@@ -6,10 +6,10 @@ import { isTerminalImportPhase, type ImportPreview, type TaskState } from '../sh
 import { CHANGE_SIZE_LIMITS, type ChangeSizeFilter, type IndexedCommit, type RepositoryIndex, type RepositoryRef, type RepositorySummary, type RepositoryTopology } from '../shared/history';
 import { useHistoryStore, type SemanticZoom } from './history-store';
 import { DiffInspector } from './diff-inspector';
+import type { Api } from './api';
 
 type Session = { token: string; managedRoot: string };
 type Directory = { name: string; path: string; isGitRepository: boolean };
-type Api = <T>(url: string, init?: RequestInit) => Promise<T>;
 
 function ImportPanel({ session, api, onImported, onRootChanged }: { session: Session; api: Api; onImported: () => void; onRootChanged: (managedRoot: string) => void }) {
   const [kind, setKind] = useState<'local' | 'remote'>('local');
@@ -196,7 +196,7 @@ function App() {
     if (!repositoryId && next[0]) {
       const parameters = new URLSearchParams(window.location.search); const requested = parameters.get('repository');
       const repository = next.find(item => item.id === requested) ?? next[0];
-      restoreUrlState(repository.id, parameters.get('a') ?? '', parameters.get('b') ?? '', parameters.get('selected') ?? '');
+      restoreUrlState({ repositoryId: repository.id, aOid: parameters.get('a') ?? '', bOid: parameters.get('b') ?? '', selectedOid: parameters.get('selected') ?? '' });
     }
     if (next.length) setShowImport(false);
   };

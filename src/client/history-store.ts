@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { ChangeSizeFilter, IndexedCommit, RepositoryRef, RepositorySummary, RepositoryTopology } from '../shared/history';
 export type SemanticZoom = 'global' | 'intermediate' | 'detail';
+export type HistoryUrlState = { repositoryId: string; aOid: string; bOid: string; selectedOid: string };
 
 type HistoryState = {
   repositories: RepositorySummary[];
@@ -31,7 +32,7 @@ type HistoryState = {
   setB: (oid: string) => void;
   swapAB: () => void;
   clearAB: () => void;
-  restoreUrlState: (repositoryId: string, aOid: string, bOid: string, selectedOid: string) => void;
+  restoreUrlState: (urlState: HistoryUrlState) => void;
   hover: (oid: string) => void;
   setMainlineRef: (mainlineRef: string) => void;
   setQuery: (query: string) => void;
@@ -85,7 +86,7 @@ export const useHistoryStore = create<HistoryState>(set => ({
   setB: bOid => set({ bOid }),
   swapAB: () => set(state => ({ aOid: state.bOid, bOid: state.aOid })),
   clearAB: () => set({ aOid: '', bOid: '' }),
-  restoreUrlState: (repositoryId, aOid, bOid, selectedOid) => set({ repositoryId, aOid, bOid, selectedOid }),
+  restoreUrlState: urlState => set(urlState),
   hover: hoveredOid => set({ hoveredOid }),
   setMainlineRef: mainlineRef => set({ mainlineRef }),
   setQuery: query => set({ query }),

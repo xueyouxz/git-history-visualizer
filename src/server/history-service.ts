@@ -265,7 +265,7 @@ export class HistoryService {
     return { mainlineRef, nodes, edges };
   }
 
-  async compare(id: string, options: { a: string; b: string; parentIndex?: number; ignoreWhitespace?: boolean }, signal?: AbortSignal): Promise<RepositoryComparison> {
+  async compare(id: string, options: { a: string; b: string; parentIndex?: number; ignoreWhitespace?: boolean; contextLines?: number }, signal?: AbortSignal): Promise<RepositoryComparison> {
     const index = await this.index(id, signal);
     const byOid = new Map(index.commits.map(commit => [commit.oid, commit]));
     if (!byOid.has(options.a) || !byOid.has(options.b)) throw new Error('比较提交不存在或不可达');
@@ -290,9 +290,10 @@ export class HistoryService {
     const [pathA, pathB] = await Promise.all([pathFrom(commonAncestor, options.a), pathFrom(commonAncestor, options.b)]);
 
     const whitespaceArgs = options.ignoreWhitespace ? ['--ignore-all-space', '--ignore-blank-lines'] : [];
-    const raw = await runGitBuffer(repository, ['diff', '--raw', '-z', '--no-ext-diff', '--no-textconv', '-M50%', ...whitespaceArgs, effectiveA, options.b, '--'], signal);
+    const diffArguments = ['--no-ext-diff', '--no-textconv', '-M50%', ...whitespaceArgs, effectiveA, options.b, '--'];
+    const raw = await runGitBuffer(repository, ['diff', '--raw', '-z', ...diffArguments], signal);
     const changed = parseRawDiff(raw);
-    const statistics = parseNumstat(await runGit(repository, ['diff', '--numstat', '-z', '--no-ext-diff', '--no-textconv', '-M50%', ...whitespaceArgs, effectiveA, options.b, '--'], signal));
+    const statistics = parseNumstat(await runGit(repository, ['diff', '--numstat', '-z', ...diffArguments], signal));
     let totalPatchBytes = 0;
     let totalTruncated = false;
     const files: DiffFile[] = [];
@@ -306,7 +307,8 @@ export class HistoryService {
         if (!remaining) { truncated = true; totalTruncated = true; }
         else {
           try {
-            const patchBuffer = await runGitBuffer(repository, ['diff', '--patch', '--no-color', '--no-ext-diff', '--no-textconv', '-M50%', '--unified=3', ...whitespaceArgs, effectiveA, options.b, '--', ...paths], signal, Math.min(DIFF_LIMITS.fileBytes, remaining));
+            const patchArguments = diffArguments.concat(paths);
+            const patchBuffer = await runGitBuffer(repository, ['diff', '--patch', '--no-color', `--unified=${options.contextLines ?? 3}`, ...patchArguments], signal, Math.min(DIFF_LIMITS.fileBytes, remaining));
             totalPatchBytes += patchBuffer.length;
             const decoded = decodeUtf8(patchBuffer); patch = decoded.text; unknownEncoding = decoded.unknownEncoding;
           } catch (cause) {
