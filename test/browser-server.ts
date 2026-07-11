@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -19,9 +19,18 @@ async function commit(message: string, name: string) {
 }
 
 await writeFile(path.join(repository, 'README.md'), 'initial\n');
+await writeFile(path.join(repository, 'old name.txt'), 'rename me\n');
+await writeFile(path.join(repository, 'delete-me.txt'), 'delete me\n');
+await writeFile(path.join(repository, 'whitespace.txt'), 'value\n');
 const initial = await commit('initial', 'Alice');
 await exec('git', ['checkout', '-b', 'feature'], { cwd: repository });
-await writeFile(path.join(repository, '含 空格.md'), Array.from({ length: 12 }, (_, index) => `内容 ${index + 1}`).join('\n') + '\n');
+await mkdir(path.join(repository, 'docs'));
+await writeFile(path.join(repository, 'docs', '含 空格.md'), Array.from({ length: 12 }, (_, index) => `内容 ${index + 1}`).join('\n') + '\n');
+await rename(path.join(repository, 'old name.txt'), path.join(repository, 'renamed.txt'));
+await unlink(path.join(repository, 'delete-me.txt'));
+await writeFile(path.join(repository, 'binary.dat'), Buffer.from([0, 1, 2, 3]));
+await writeFile(path.join(repository, 'unknown.txt'), Buffer.from([0x66, 0x6f, 0x80, 0x0a]));
+await writeFile(path.join(repository, 'whitespace.txt'), 'value    \n\n');
 await writeFile(path.join(repository, '.mailmap'), 'Bob <bob@example.com> Robert <robert@example.com>\n');
 const feature = await commit('add unicode guide', 'Robert');
 await exec('git', ['tag', 'v1-feature', feature], { cwd: repository });

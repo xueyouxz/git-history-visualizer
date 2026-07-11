@@ -61,3 +61,34 @@ test('探索 DAG 时缩放、选择、搜索、筛选、主线和框选状态一
   await expect(graph).toHaveAccessibleName(/4 个提交.*refs\/heads\/main/);
   await expect.poll(() => page.locator('.commit-node').evaluateAll(nodes => nodes.map(node => ({ transform: node.getAttribute('transform'), label: node.querySelector('button')?.getAttribute('aria-label') })))).toEqual(initialLayout);
 });
+
+test('设置、交换、清除并恢复 A/B，显示非颜色标记和文件差异', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Git 历史可视化' })).toBeVisible({ timeout: 15_000 });
+  await page.getByRole('button', { name: /initial，Alice/ }).click();
+  await page.getByRole('button', { name: '设当前为 A' }).click();
+  await page.getByRole('button', { name: /add unicode guide，Bob/ }).click();
+  await page.getByRole('button', { name: '设当前为 B' }).click();
+
+  await expect(page.getByRole('button', { name: /initial，Alice.*版本 A/ })).toBeVisible();
+  await expect(page.getByRole('button', { name: /add unicode guide，Bob.*版本 B/ })).toBeVisible();
+  await expect(page.locator('.marker-a')).toContainText('A');
+  await expect(page.locator('.marker-b')).toContainText('B');
+  await expect(page.locator('.comparison-path')).toContainText('同祖先链', { timeout: 15_000 });
+  await expect(page.getByText(/推断重命名，100% 相似/)).toBeVisible();
+  await expect(page.getByText(/二进制文件，只显示元数据/)).toBeVisible();
+  await expect(page.getByText(/无法按 UTF-8 解码/)).toBeVisible();
+  await expect(page.getByRole('button', { name: '左右对照' })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('button', { name: '统一 diff' }).click();
+  await expect(page.locator('.unified-diff').first()).toBeVisible();
+  await page.getByLabel('文件类型').selectOption('.md');
+  await expect(page.locator('.diff-file')).toHaveCount(1);
+
+  await page.getByRole('button', { name: '交换 A/B' }).click();
+  await expect(page.locator('.ab-summary')).toContainText('add unicode guide');
+  await page.reload();
+  await expect(page.locator('.ab-summary')).toContainText('add unicode guide');
+  await expect(page.locator('.comparison-path')).toBeVisible({ timeout: 15_000 });
+  await page.getByRole('button', { name: '清除' }).click();
+  await expect(page.locator('.ab-summary')).toContainText('未设置');
+});

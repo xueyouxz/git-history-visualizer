@@ -11,6 +11,8 @@ type HistoryState = {
   refs: RepositoryRef[];
   topology?: RepositoryTopology;
   selectedOid: string;
+  aOid: string;
+  bOid: string;
   hoveredOid: string;
   mainlineRef: string;
   query: string;
@@ -25,6 +27,11 @@ type HistoryState = {
   setCommits: (commits: IndexedCommit[]) => void;
   setTopology: (topology: RepositoryTopology) => void;
   select: (oid: string) => void;
+  setA: (oid: string) => void;
+  setB: (oid: string) => void;
+  swapAB: () => void;
+  clearAB: () => void;
+  restoreUrlState: (repositoryId: string, aOid: string, bOid: string, selectedOid: string) => void;
   hover: (oid: string) => void;
   setMainlineRef: (mainlineRef: string) => void;
   setQuery: (query: string) => void;
@@ -43,6 +50,8 @@ export const useHistoryStore = create<HistoryState>(set => ({
   commits: [],
   refs: [],
   selectedOid: '',
+  aOid: '',
+  bOid: '',
   hoveredOid: '',
   mainlineRef: '',
   query: '',
@@ -52,8 +61,16 @@ export const useHistoryStore = create<HistoryState>(set => ({
   semanticZoom: 'intermediate',
   boxedOids: [],
   setRepositories: repositories => set({ repositories }),
-  openRepository: repositoryId => set({ repositoryId, selectedOid: '', hoveredOid: '', boxedOids: [], query: '', author: '', refFilter: '', changeSize: '' }),
-  setHistory: (commits, refs, topology) => set({ allCommits: commits, commits, refs, topology, mainlineRef: topology.mainlineRef, selectedOid: commits[0]?.oid ?? '' }),
+  openRepository: repositoryId => set({ repositoryId, selectedOid: '', aOid: '', bOid: '', hoveredOid: '', boxedOids: [], query: '', author: '', refFilter: '', changeSize: '' }),
+  setHistory: (commits, refs, topology) => set(state => {
+    const available = new Set(commits.map(commit => commit.oid));
+    return {
+      allCommits: commits, commits, refs, topology, mainlineRef: topology.mainlineRef,
+      selectedOid: available.has(state.selectedOid) ? state.selectedOid : commits[0]?.oid ?? '',
+      aOid: available.has(state.aOid) ? state.aOid : '',
+      bOid: available.has(state.bOid) ? state.bOid : '',
+    };
+  }),
   setCommits: commits => set(state => {
     const visible = new Set(commits.map(commit => commit.oid));
     return {
@@ -64,6 +81,11 @@ export const useHistoryStore = create<HistoryState>(set => ({
   }),
   setTopology: topology => set({ topology, mainlineRef: topology.mainlineRef }),
   select: selectedOid => set({ selectedOid }),
+  setA: aOid => set({ aOid }),
+  setB: bOid => set({ bOid }),
+  swapAB: () => set(state => ({ aOid: state.bOid, bOid: state.aOid })),
+  clearAB: () => set({ aOid: '', bOid: '' }),
+  restoreUrlState: (repositoryId, aOid, bOid, selectedOid) => set({ repositoryId, aOid, bOid, selectedOid }),
   hover: hoveredOid => set({ hoveredOid }),
   setMainlineRef: mainlineRef => set({ mainlineRef }),
   setQuery: query => set({ query }),

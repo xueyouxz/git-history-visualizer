@@ -39,6 +39,15 @@ export function createApp(options: { managedRoot?: string; browseRoot?: string; 
         }
         const topologyRoute = url.pathname.match(/^\/api\/repositories\/([^/]+)\/topology$/);
         if (topologyRoute && req.method === 'GET') return json(res, 200, await history.topology(decodeURIComponent(topologyRoute[1]), url.searchParams.get('mainlineRef'), requestController.signal));
+        const diffRoute = url.pathname.match(/^\/api\/repositories\/([^/]+)\/diff$/);
+        if (diffRoute && req.method === 'GET') {
+          const a = url.searchParams.get('a') ?? ''; const b = url.searchParams.get('b') ?? '';
+          if (!/^[0-9a-f]{40,64}$/.test(a) || !/^[0-9a-f]{40,64}$/.test(b)) return json(res, 400, { error: '比较提交无效' });
+          const parentValue = url.searchParams.get('parent');
+          const parentIndex = parentValue === null ? undefined : Number(parentValue);
+          if (parentIndex !== undefined && (!Number.isInteger(parentIndex) || parentIndex < 0 || parentIndex > 15)) return json(res, 400, { error: '父提交序号无效' });
+          return json(res, 200, await history.compare(decodeURIComponent(diffRoute[1]), { a, b, parentIndex, ignoreWhitespace: url.searchParams.get('ignoreWhitespace') === 'true' }, requestController.signal));
+        }
         const commitRoute = url.pathname.match(/^\/api\/repositories\/([^/]+)\/commits\/([0-9a-f]{40,64})$/);
         if (commitRoute && req.method === 'GET') {
           const commit = await history.commit(decodeURIComponent(commitRoute[1]), commitRoute[2], requestController.signal);

@@ -29,9 +29,9 @@ input, select { width: 100%; min-height: 38px; padding: 8px 10px; }
 .status { display: grid; gap: 8px; }
 progress { width: 100%; accent-color: #245f89; }
 .error, .status.error, .status.cancelled { color: #8b2d20; }
-.workspace { height: calc(100vh - 116px); min-height: 620px; display: grid; grid-template-columns: 224px minmax(560px, 1fr) 352px; border-bottom: 1px solid #aeb5b9; }
+.workspace { height: calc(100vh - 116px); min-height: 700px; display: grid; grid-template-columns: 224px minmax(560px, 1fr) 352px; grid-template-rows: minmax(360px, 66%) minmax(270px, 34%); border-bottom: 1px solid #aeb5b9; }
 .sidebar, .inspector { padding: 16px; background: #fffdf8; overflow: auto; }
-.sidebar { border-right: 1px solid #aeb5b9; display: flex; flex-direction: column; gap: 14px; }
+.sidebar { grid-row: 1 / 3; border-right: 1px solid #aeb5b9; display: flex; flex-direction: column; gap: 14px; }
 .inspector { border-left: 1px solid #aeb5b9; }
 .inspector dl { margin: 18px 0; display: grid; gap: 9px; }
 .inspector dl div { display: grid; grid-template-columns: 72px 1fr; gap: 8px; }
@@ -53,6 +53,10 @@ progress { width: 100%; accent-color: #245f89; }
 .commit-node .branch { fill: #fffdf8; stroke: #8b5a2b; }
 .commit-node.related circle { fill: #dbe9f1; }
 .commit-node.selected circle { fill: #245f89; stroke: #17202a; }
+.ab-marker { pointer-events: none; }
+.ab-marker rect, .ab-marker path { fill: #fffdf8; stroke: #17202a; stroke-width: 2.5; vector-effect: non-scaling-stroke; }
+.ab-marker text { font-size: 10px; font-weight: 800; text-anchor: middle; fill: #17202a; }
+.marker-b path { stroke-dasharray: 3 2; }
 .commit-node text { font-family: "Source Han Sans SC", system-ui, sans-serif; pointer-events: none; }
 .oid { font-family: ui-monospace, SFMono-Regular, monospace !important; font-size: 10px; text-anchor: middle; fill: #59666d; }
 .subject { font-size: 12px; font-weight: 700; text-anchor: middle; fill: #17202a; }
@@ -66,4 +70,26 @@ progress { width: 100%; accent-color: #245f89; }
 .graph-summary summary { cursor: pointer; font-weight: 700; }
 .graph-summary ol { margin: 8px 0 0; padding-left: 22px; }
 .graph-summary button { width: 100%; border: 0; padding: 4px; text-align: left; font-size: 11px; }
+.diff-inspector { grid-column: 2 / 4; min-width: 0; overflow: auto; padding: 14px 16px 20px; background: #fffdf8; border-top: 1px solid #aeb5b9; }
+.ab-actions, .diff-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ab-actions button { padding: 5px 9px; font-size: 12px; }
+.ab-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0; }
+.ab-summary div { display: grid; grid-template-columns: 24px 1fr; gap: 6px; min-width: 0; }
+.ab-summary dt { font-weight: 800; }
+.ab-summary dd { margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.diff-toolbar { justify-content: space-between; margin: 10px 0; }
+.diff-toolbar button { padding: 5px 9px; font-size: 12px; }
+.inline-check { display: flex; grid-template-columns: auto 1fr; align-items: center; gap: 6px; }
+.inline-check input { width: auto; min-height: auto; }
+.comparison-path { padding: 8px 10px; background: #eef3f5; font-size: 12px; }
+.diff-files { margin-top: 10px; }
+.diff-files > details { border-top: 1px solid #aeb5b9; padding: 8px 0; }
+.diff-files summary { cursor: pointer; font-weight: 800; }
+.diff-file { margin: 8px 0 14px; border: 1px solid #d3d7d9; }
+.diff-file h3, .file-meta { margin: 0; padding: 7px 10px; overflow-wrap: anywhere; }
+.file-meta { border-top: 1px solid #e4e6e7; color: #59666d; font-size: 11px; }
+.unified-diff, .split-diff pre { margin: 0; padding: 10px; overflow: auto; background: #f7f8f7; font: 11px/1.45 ui-monospace, SFMono-Regular, monospace; white-space: pre; }
+.split-diff { display: grid; grid-template-columns: 1fr 1fr; min-width: 0; }
+.split-diff pre + pre { border-left: 1px solid #aeb5b9; }
+.diff-notice { margin: 0; padding: 10px; background: #f7f8f7; }
 @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto !important; transition: none !important; } }

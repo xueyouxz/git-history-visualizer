@@ -51,3 +51,35 @@ export type RepositoryTopology = {
   nodes: TopologyNode[];
   edges: TopologyEdge[];
 };
+
+export const DIFF_LIMITS = { fileBytes: 512 * 1024, totalBytes: 2 * 1024 * 1024 } as const;
+export type DiffRelation = 'same' | 'a-ancestor-of-b' | 'b-ancestor-of-a' | 'diverged';
+export type DiffFileStatus = 'added' | 'modified' | 'deleted' | 'renamed';
+
+export type DiffFile = {
+  path: string;
+  oldPath?: string;
+  status: DiffFileStatus;
+  additions: number;
+  deletions: number;
+  binary: boolean;
+  unknownEncoding: boolean;
+  truncated: boolean;
+  similarity?: number;
+  inferred: boolean;
+  patch: string;
+};
+
+export type RepositoryComparison = {
+  a: string;
+  b: string;
+  effectiveA: string;
+  parentIndex?: number;
+  relation: DiffRelation;
+  commonAncestor: string;
+  pathA: string[];
+  pathB: string[];
+  files: DiffFile[];
+  truncated: boolean;
+  totalPatchBytes: number;
+};

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { mkdir, mkdtemp, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -8,10 +8,6 @@ import { createApp } from '../src/server/app.js';
 
 const exec = promisify(execFile);
 const cleanup: string[] = [];
-
-afterEach(async () => {
-  await Promise.all(cleanup.splice(0).map(target => rm(target, { recursive: true, force: true })));
-});
 
 async function commit(repository: string, message: string, name: string) {
   await exec('git', ['add', '.'], { cwd: repository });
@@ -30,6 +26,7 @@ async function createHistoryFixture() {
   await writeFile(path.join(repository, 'README.md'), 'initial\n');
   await writeFile(path.join(repository, 'old name.txt'), 'rename me\n');
   await writeFile(path.join(repository, 'delete-me.txt'), 'delete me\n');
+  await writeFile(path.join(repository, 'whitespace.txt'), 'value\n');
   const initial = await commit(repository, 'initial', 'Alice');
   await exec('git', ['checkout', '-b', 'feature'], { cwd: repository });
   await mkdir(path.join(repository, 'docs'));
@@ -37,6 +34,7 @@ async function createHistoryFixture() {
   await rename(path.join(repository, 'old name.txt'), path.join(repository, 'renamed.txt'));
   await unlink(path.join(repository, 'delete-me.txt'));
   await writeFile(path.join(repository, 'binary.dat'), Buffer.from([0, 1, 2, 3]));
+  await writeFile(path.join(repository, 'unknown.txt'), Buffer.from([0x66, 0x6f, 0x80, 0x0a]));
   await writeFile(path.join(repository, 'whitespace.txt'), 'value    \n\n');
   await writeFile(path.join(repository, '.mailmap'), 'Bob <bob@example.com> Robert <robert@example.com>\n');
   const feature = await commit(repository, 'add unicode guide', 'Robert');
@@ -67,10 +65,18 @@ async function startApp(managedRoot: string) {
   return { app, base, headers };
 }
 
+let sharedFixture: Awaited<ReturnType<typeof createHistoryFixture>>;
+let sharedApp: Awaited<ReturnType<typeof startApp>>;
+beforeAll(async () => { sharedFixture = await createHistoryFixture(); sharedApp = await startApp(sharedFixture.managedRoot); });
+afterAll(async () => {
+  await new Promise<void>(resolve => sharedApp.app.server.close(() => resolve()));
+  await Promise.all(cleanup.splice(0).map(target => rm(target, { recursive: true, force: true })));
+});
+
 describe('提交历史 REST 接口', () => {
   it('索引真实可达提交、公开 refs、作者、路径和变更统计', async () => {
-    const fixture = await createHistoryFixture();
-    const { app, base, headers } = await startApp(fixture.managedRoot);
+    const fixture = sharedFixture;
+    const { base, headers } = sharedApp;
 
     const repositoriesResponse = await fetch(`${base}/api/repositories`, { headers });
     expect(repositoriesResponse.status).toBe(200);
@@ -98,9 +104,9 @@ describe('提交历史 REST 接口', () => {
     expect(commits.find((entry: { oid: string }) => entry.oid === fixture.oids.feature)).toMatchObject({
       author: 'Bob',
       subject: 'add unicode guide',
-      additions: 16,
-      deletions: 2,
-      filesChanged: 7,
+      additions: 17,
+      deletions: 3,
+      filesChanged: 8,
     });
     expect(commits.find((entry: { oid: string }) => entry.oid === fixture.oids.feature).paths).toEqual([
       '.mailmap',
@@ -109,15 +115,55 @@ describe('提交历史 REST 接口', () => {
       'docs/含 空格.md',
       'old name.txt',
       'renamed.txt',
+      'unknown.txt',
       'whitespace.txt',
     ]);
 
-    await new Promise<void>(resolve => app.server.close(() => resolve()));
+  }, 15_000);
+
+  it('比较同祖先链和分叉历史，并解析重命名、删除、二进制与未知编码', async () => {
+    const fixture = sharedFixture;
+    const { base, headers } = sharedApp;
+    const compare = async (a: string, b: string, suffix = '') => {
+      const response = await fetch(`${base}/api/repositories/fixture/diff?a=${a}&b=${b}${suffix}`, { headers });
+      expect(response.status).toBe(200);
+      return response.json();
+    };
+
+    const linear = await compare(fixture.oids.initial, fixture.oids.feature);
+    expect(linear).toMatchObject({ relation: 'a-ancestor-of-b', commonAncestor: fixture.oids.initial });
+    expect(linear.pathA).toEqual([]);
+    expect(linear.pathB).toEqual([fixture.oids.feature]);
+    expect(linear.files.find((file: { path: string }) => file.path === 'renamed.txt')).toMatchObject({
+      status: 'renamed', oldPath: 'old name.txt', similarity: 100, inferred: true,
+    });
+    expect(linear.files.find((file: { path: string }) => file.path === 'delete-me.txt')).toMatchObject({ status: 'deleted' });
+    expect(linear.files.find((file: { path: string }) => file.path === 'binary.dat')).toMatchObject({ binary: true, patch: '' });
+    expect(linear.files.find((file: { path: string }) => file.path === 'unknown.txt')).toMatchObject({ unknownEncoding: true, patch: '' });
+
+    const diverged = await compare(fixture.oids.main, fixture.oids.feature);
+    expect(diverged).toMatchObject({ relation: 'diverged', commonAncestor: fixture.oids.initial });
+    expect(diverged.pathA).toEqual([fixture.oids.main]);
+    expect(diverged.pathB).toEqual([fixture.oids.feature]);
+
+    const mergeDefault = await compare(fixture.oids.initial, fixture.oids.merge, '&parent=0');
+    expect(mergeDefault.effectiveA).toBe(fixture.oids.main);
+    const mergeOtherParent = await compare(fixture.oids.initial, fixture.oids.merge, '&parent=1');
+    expect(mergeOtherParent.effectiveA).toBe(fixture.oids.feature);
+  }, 15_000);
+
+  it('忽略空白时排除仅空白差异', async () => {
+    const fixture = sharedFixture;
+    const { base, headers } = sharedApp;
+    const normal = await fetch(`${base}/api/repositories/fixture/diff?a=${fixture.oids.initial}&b=${fixture.oids.feature}`, { headers }).then(response => response.json());
+    const ignored = await fetch(`${base}/api/repositories/fixture/diff?a=${fixture.oids.initial}&b=${fixture.oids.feature}&ignoreWhitespace=true`, { headers }).then(response => response.json());
+    expect(normal.files.some((file: { path: string }) => file.path === 'whitespace.txt')).toBe(true);
+    expect(ignored.files.some((file: { path: string }) => file.path === 'whitespace.txt')).toBe(false);
   }, 15_000);
 
   it('搜索提交并按作者和 ref 筛选', async () => {
-    const fixture = await createHistoryFixture();
-    const { app, base, headers } = await startApp(fixture.managedRoot);
+    const fixture = sharedFixture;
+    const { base, headers } = sharedApp;
 
     const search = async (parameters: string) => {
       const response = await fetch(`${base}/api/repositories/fixture/commits?${parameters}`, { headers });
@@ -135,12 +181,11 @@ describe('提交历史 REST 接口', () => {
     expect(detailResponse.status).toBe(200);
     expect(await detailResponse.json()).toMatchObject({ oid: fixture.oids.merge, parents: [fixture.oids.main, fixture.oids.feature], subject: 'merge feature' });
 
-    await new Promise<void>(resolve => app.server.close(() => resolve()));
   }, 15_000);
 
   it('返回确定性拓扑，并将所选 ref 的 first-parent 放在主线轨道', async () => {
-    const fixture = await createHistoryFixture();
-    const { app, base, headers } = await startApp(fixture.managedRoot);
+    const fixture = sharedFixture;
+    const { base, headers } = sharedApp;
 
     const readTopology = async (mainlineRef = '') => {
       const suffix = mainlineRef ? `?mainlineRef=${encodeURIComponent(mainlineRef)}` : '';
@@ -164,6 +209,5 @@ describe('提交历史 REST 接口', () => {
       fixture.oids.initial,
     ]);
 
-    await new Promise<void>(resolve => app.server.close(() => resolve()));
   }, 15_000);
 });

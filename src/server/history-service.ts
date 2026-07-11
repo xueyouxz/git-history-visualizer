@@ -4,11 +4,14 @@ import path from 'node:path';
 import {
   REPOSITORY_INDEX_VERSION,
   CHANGE_SIZE_LIMITS,
+  DIFF_LIMITS,
+  type DiffFile,
   type IndexedCommit,
   type RepositoryIndex,
   type RepositoryRef,
   type RepositorySummary,
   type RepositoryTopology,
+  type RepositoryComparison,
 } from '../shared/history.js';
 
 const gitEnvironment = {
@@ -19,8 +22,8 @@ const gitEnvironment = {
   GIT_TERMINAL_PROMPT: '0',
 };
 
-function runGit(repository: string, args: string[], signal?: AbortSignal) {
-  return new Promise<string>((resolve, reject) => {
+function runGitBuffer(repository: string, args: string[], signal?: AbortSignal, maxBytes = 4 * 1024 * 1024) {
+  return new Promise<Buffer>((resolve, reject) => {
     if (signal?.aborted) return reject(new DOMException('操作已取消', 'AbortError'));
     const child = spawn('git', ['-C', repository, '-c', 'core.hooksPath=/dev/null', '-c', 'diff.external=', '-c', 'mailmap.blob=HEAD:.mailmap', ...args], {
       env: { ...process.env, ...gitEnvironment },
@@ -28,7 +31,13 @@ function runGit(repository: string, args: string[], signal?: AbortSignal) {
     });
     const output: Buffer[] = [];
     const errors: Buffer[] = [];
-    child.stdout.on('data', chunk => output.push(chunk));
+    let outputBytes = 0;
+    let limitExceeded = false;
+    child.stdout.on('data', chunk => {
+      outputBytes += chunk.length;
+      if (outputBytes > maxBytes) { limitExceeded = true; child.kill('SIGTERM'); return; }
+      output.push(chunk);
+    });
     child.stderr.on('data', chunk => errors.push(chunk));
     const abort = () => child.kill('SIGTERM');
     signal?.addEventListener('abort', abort, { once: true });
@@ -36,10 +45,54 @@ function runGit(repository: string, args: string[], signal?: AbortSignal) {
     child.on('close', code => {
       signal?.removeEventListener('abort', abort);
       if (signal?.aborted) reject(new DOMException('操作已取消', 'AbortError'));
-      else if (code === 0) resolve(Buffer.concat(output).toString('utf8'));
+      else if (limitExceeded) reject(new Error('Git 输出超过数据量上限'));
+      else if (code === 0) resolve(Buffer.concat(output));
       else reject(new Error(Buffer.concat(errors).toString('utf8').trim() || `Git 退出，状态码 ${code}`));
     });
   });
+}
+
+async function runGit(repository: string, args: string[], signal?: AbortSignal, maxBytes?: number) {
+  return (await runGitBuffer(repository, args, signal, maxBytes)).toString('utf8');
+}
+
+type RawDiff = Pick<DiffFile, 'path' | 'oldPath' | 'status' | 'similarity' | 'inferred'>;
+
+function parseRawDiff(output: Buffer): RawDiff[] {
+  const fields = output.toString('utf8').split('\0');
+  const files: RawDiff[] = [];
+  for (let index = 0; index < fields.length - 1;) {
+    const header = fields[index++];
+    if (!header.startsWith(':')) continue;
+    const statusCode = header.trim().split(/\s+/).at(-1) ?? 'M';
+    const firstPath = fields[index++] ?? '';
+    if (statusCode.startsWith('R')) {
+      const nextPath = fields[index++] ?? '';
+      files.push({ path: nextPath, oldPath: firstPath, status: 'renamed', similarity: Number(statusCode.slice(1)), inferred: true });
+    } else {
+      files.push({
+        path: firstPath,
+        status: statusCode.startsWith('A') ? 'added' : statusCode.startsWith('D') ? 'deleted' : 'modified',
+        inferred: false,
+      });
+    }
+  }
+  return files;
+}
+
+function decodeUtf8(buffer: Buffer) {
+  try { return { text: new TextDecoder('utf-8', { fatal: true }).decode(buffer), unknownEncoding: false }; }
+  catch { return { text: '', unknownEncoding: true }; }
+}
+
+function parseNumstat(output: string) {
+  const fields = output.split('\0'); const result = new Map<string, { additions: number; deletions: number; binary: boolean }>();
+  for (let index = 0; index < fields.length - 1;) {
+    const record = fields[index++]; const [added = '0', deleted = '0', inlinePath = ''] = record.split('\t');
+    const path = inlinePath || (index++, fields[index++] ?? '');
+    result.set(path, { additions: Number(added) || 0, deletions: Number(deleted) || 0, binary: added === '-' || deleted === '-' });
+  }
+  return result;
 }
 
 const refKind = (name: string): RepositoryRef['kind'] =>
@@ -210,5 +263,61 @@ export class HistoryService {
     });
     const edges = index.commits.flatMap(commit => commit.parents.map(parent => ({ from: commit.oid, to: parent })));
     return { mainlineRef, nodes, edges };
+  }
+
+  async compare(id: string, options: { a: string; b: string; parentIndex?: number; ignoreWhitespace?: boolean }, signal?: AbortSignal): Promise<RepositoryComparison> {
+    const index = await this.index(id, signal);
+    const byOid = new Map(index.commits.map(commit => [commit.oid, commit]));
+    if (!byOid.has(options.a) || !byOid.has(options.b)) throw new Error('比较提交不存在或不可达');
+    const parentIndex = options.parentIndex;
+    const selectedParent = parentIndex === undefined ? undefined : byOid.get(options.b)?.parents[parentIndex];
+    if (parentIndex !== undefined && !selectedParent) throw new Error('父提交序号无效');
+    const effectiveA = selectedParent ?? options.a;
+    const repository = await this.repositoryPath(id);
+
+    const ancestors = (start: string) => {
+      const result = new Set<string>(); const pending = [start];
+      while (pending.length) { const oid = pending.pop()!; if (result.has(oid)) continue; result.add(oid); pending.push(...(byOid.get(oid)?.parents ?? [])); }
+      return result;
+    };
+    const aAncestors = ancestors(options.a); const bAncestors = ancestors(options.b);
+    const relation = options.a === options.b ? 'same'
+      : bAncestors.has(options.a) ? 'a-ancestor-of-b'
+        : aAncestors.has(options.b) ? 'b-ancestor-of-a' : 'diverged';
+    const commonAncestor = (await runGit(repository, ['merge-base', options.a, options.b], signal, 256)).trim();
+    const pathFrom = async (base: string, tip: string) => base === tip ? [] : (await runGit(repository, ['rev-list', '--reverse', '--ancestry-path', `${base}..${tip}`], signal))
+      .trim().split('\n').filter(Boolean);
+    const [pathA, pathB] = await Promise.all([pathFrom(commonAncestor, options.a), pathFrom(commonAncestor, options.b)]);
+
+    const whitespaceArgs = options.ignoreWhitespace ? ['--ignore-all-space', '--ignore-blank-lines'] : [];
+    const raw = await runGitBuffer(repository, ['diff', '--raw', '-z', '--no-ext-diff', '--no-textconv', '-M50%', ...whitespaceArgs, effectiveA, options.b, '--'], signal);
+    const changed = parseRawDiff(raw);
+    const statistics = parseNumstat(await runGit(repository, ['diff', '--numstat', '-z', '--no-ext-diff', '--no-textconv', '-M50%', ...whitespaceArgs, effectiveA, options.b, '--'], signal));
+    let totalPatchBytes = 0;
+    let totalTruncated = false;
+    const files: DiffFile[] = [];
+    for (const change of changed) {
+      const paths = [...new Set([change.oldPath, change.path].filter((value): value is string => Boolean(value)))];
+      const statistic = statistics.get(change.path) ?? { additions: 0, deletions: 0, binary: false };
+      const binary = statistic.binary;
+      let patch = ''; let unknownEncoding = false; let truncated = false;
+      if (!binary) {
+        const remaining = Math.max(0, DIFF_LIMITS.totalBytes - totalPatchBytes);
+        if (!remaining) { truncated = true; totalTruncated = true; }
+        else {
+          try {
+            const patchBuffer = await runGitBuffer(repository, ['diff', '--patch', '--no-color', '--no-ext-diff', '--no-textconv', '-M50%', '--unified=3', ...whitespaceArgs, effectiveA, options.b, '--', ...paths], signal, Math.min(DIFF_LIMITS.fileBytes, remaining));
+            totalPatchBytes += patchBuffer.length;
+            const decoded = decodeUtf8(patchBuffer); patch = decoded.text; unknownEncoding = decoded.unknownEncoding;
+          } catch (cause) {
+            if ((cause as Error).message === 'Git 输出超过数据量上限') { truncated = true; totalTruncated = true; }
+            else throw cause;
+          }
+        }
+      }
+      if (options.ignoreWhitespace && !binary && !unknownEncoding && !truncated && !patch.includes('\n@@')) continue;
+      files.push({ ...change, additions: statistic.additions, deletions: statistic.deletions, binary, unknownEncoding, truncated, patch });
+    }
+    return { a: options.a, b: options.b, effectiveA, parentIndex, relation, commonAncestor, pathA, pathB, files, truncated: totalTruncated, totalPatchBytes };
   }
 }
