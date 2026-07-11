@@ -9,14 +9,15 @@ const json = (res: ServerResponse, status: number, body: unknown) => { res.write
 const contentType = (file: string) => file.endsWith('.html') ? 'text/html; charset=utf-8' : file.endsWith('.js') ? 'text/javascript; charset=utf-8' : file.endsWith('.css') ? 'text/css; charset=utf-8' : 'application/octet-stream';
 const body = async (req: IncomingMessage) => { const chunks: Buffer[] = []; for await (const chunk of req) { chunks.push(chunk); if (chunks.reduce((n, b) => n + b.length, 0) > 16_384) throw new Error('请求内容过大'); } return JSON.parse(Buffer.concat(chunks).toString('utf8')); };
 
-export function createApp(options: { managedRoot?: string; devMiddleware?: (req: IncomingMessage, res: ServerResponse, next: () => void) => void } = {}) {
+export function createApp(options: { managedRoot?: string; browseRoot?: string; devMiddleware?: (req: IncomingMessage, res: ServerResponse, next: () => void) => void } = {}) {
   const token = randomBytes(24).toString('base64url');
-  const imports = new ImportService(options.managedRoot);
+  const imports = new ImportService(options.managedRoot, options.browseRoot);
   const server = createServer(async (req, res) => {
     const host = req.headers.host ?? '';
     if (!/^(127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(host)) return json(res, 403, { error: 'Host 被拒绝' });
     const origin = req.headers.origin;
     if (origin && origin !== `http://${host}`) return json(res, 403, { error: 'Origin 被拒绝' });
+    if (!['GET', 'HEAD'].includes(req.method ?? '') && origin !== `http://${host}`) return json(res, 403, { error: '写请求必须来自当前应用' });
     const url = new URL(req.url ?? '/', `http://${host}`);
     try {
       if (url.pathname === '/api/session' && req.method === 'GET') return json(res, 200, { token, managedRoot: imports.root });

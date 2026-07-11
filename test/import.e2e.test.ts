@@ -17,7 +17,7 @@ describe('完整本地应用导入', () => {
     const source = path.join(root, 'source'); const managed = path.join(root, 'managed'); await mkdir(source);
     await exec('git', ['init', '-b', 'main'], { cwd: source }); await exec('git', ['config', 'user.email', 'test@example.com'], { cwd: source }); await exec('git', ['config', 'user.name', 'Test'], { cwd: source });
     await writeFile(path.join(source, 'README.md'), 'fixture'); await exec('git', ['add', '.'], { cwd: source }); await exec('git', ['commit', '-m', 'initial'], { cwd: source }); await exec('git', ['tag', 'v1'], { cwd: source });
-    const app = createApp({ managedRoot: managed }); await new Promise<void>(resolve => app.server.listen(0, '127.0.0.1', resolve));
+    const app = createApp({ managedRoot: managed, browseRoot: root }); await new Promise<void>(resolve => app.server.listen(0, '127.0.0.1', resolve));
     const address = app.server.address(); if (!address || typeof address === 'string') throw new Error('服务启动失败');
     const base = `http://127.0.0.1:${address.port}`; const headers = { Origin: base, 'X-Session-Token': app.token, 'Content-Type': 'application/json' };
     const response = await fetch(`${base}/api/imports`, { method: 'POST', headers, body: JSON.stringify({ kind: 'local', source }) }); expect(response.status).toBe(202);
@@ -30,13 +30,13 @@ describe('完整本地应用导入', () => {
 
   it('拒绝无令牌、恶意 Host、路径越界和非 HTTPS 远程来源', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'git-visualizer-')); cleanup.push(root);
-    const app = createApp({ managedRoot: root }); await new Promise<void>(resolve => app.server.listen(0, '127.0.0.1', resolve));
+    const app = createApp({ managedRoot: path.join(root, 'managed'), browseRoot: root }); await new Promise<void>(resolve => app.server.listen(0, '127.0.0.1', resolve));
     const address = app.server.address(); if (!address || typeof address === 'string') throw new Error(); const base = `http://127.0.0.1:${address.port}`;
     expect((await fetch(`${base}/api/browse`)).status).toBe(401);
     const hostStatus = await new Promise<number>((resolve, reject) => { const req = request({ hostname: '127.0.0.1', port: address.port, path: '/api/session', headers: { Host: 'evil.test' } }, res => { res.resume(); resolve(res.statusCode ?? 0); }); req.on('error', reject); req.end(); });
     expect(hostStatus).toBe(403);
-    const headers = { 'X-Session-Token': app.token, 'Content-Type': 'application/json' };
-    expect((await fetch(`${base}/api/browse?path=${encodeURIComponent(tmpdir())}`, { headers })).status).toBe(400);
+    const headers = { Origin: base, 'X-Session-Token': app.token, 'Content-Type': 'application/json' };
+    expect((await fetch(`${base}/api/browse?path=${encodeURIComponent(path.dirname(root))}`, { headers })).status).toBe(400);
     const rejected = await fetch(`${base}/api/imports`, { method: 'POST', headers, body: JSON.stringify({ kind: 'remote', source: 'ssh://example.com/repo.git' }) });
     expect(rejected.status).toBe(400); expect(await rejected.json()).toMatchObject({ error: '远程导入只接受公开 HTTPS Git URL' });
     await new Promise<void>(resolve => app.server.close(() => resolve()));
