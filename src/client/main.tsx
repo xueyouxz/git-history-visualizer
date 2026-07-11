@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
-import type { ImportPreview, TaskState } from '../shared/import';
+import { isTerminalImportPhase, type ImportPreview, type TaskState } from '../shared/import';
 
 type Directory = { name: string; path: string; isGitRepository: boolean };
 
@@ -47,9 +47,9 @@ function App() {
     <section className="panel"><div className="tabs"><button aria-pressed={kind === 'local'} onClick={() => { setKind('local'); selectSource(''); }}>本地仓库</button><button aria-pressed={kind === 'remote'} onClick={() => { setKind('remote'); selectSource(''); }}>远程仓库</button></div>
       {kind === 'local' ? <div><div className="pathbar"><span>{currentPath}</span><button onClick={() => browse(currentPath.split('/').slice(0,-1).join('/') || '/')}>上一级</button></div><ul>{directories.map(d => <li key={d.path}><button onClick={() => d.isGitRepository ? selectSource(d.path) : browse(d.path)}><span>{d.name}</span><small>{d.isGitRepository ? 'Git 仓库，选择' : '目录'}</small></button></li>)}</ul><label>已选仓库<input value={source} readOnly placeholder="选择上方标记为 Git 仓库的目录" /></label></div> : <label>公开 HTTPS Git URL<input value={source} onChange={e => selectSource(e.target.value)} placeholder="https://github.com/owner/repository.git" /></label>}
       <p className="root">受管目录：<code>{session?.managedRoot}</code></p>
-      {!preview && <button className="primary" disabled={!source || !!task && !['complete','cancelled','error'].includes(task.phase)} onClick={inspect}>检查仓库</button>}
+      {!preview && <button className="primary" disabled={!source || !!task && !isTerminalImportPhase(task.phase)} onClick={inspect}>检查仓库</button>}
       {preview && <div className="preview" role="region" aria-label="导入确认"><strong>确认导入对象</strong><dl><div><dt>来源</dt><dd><code>{preview.source}</code></dd></div><div><dt>默认分支</dt><dd>{preview.defaultBranch ?? '无法确定'}</dd></div><div><dt>预计提交数</dt><dd>{preview.estimatedCommitCount ?? '远程仓库将在克隆后统计'}</dd></div></dl><div className="actions"><button className="primary" onClick={start}>确认并导入</button><button className="secondary" onClick={() => setPreview(undefined)}>返回修改</button></div></div>}
-      {task && <div className={`status ${task.phase}`} role="status"><progress max="100" value={task.progress} /><strong>{task.progress.toFixed(0)}% · {task.message}</strong>{task.repositoryPath && <code>{task.repositoryPath}</code>}{!['complete','cancelled','error'].includes(task.phase) && <button onClick={cancel}>取消导入</button>}{task.recoverable && <button onClick={() => { setTask(undefined); setPreview(undefined); }}>修改来源后重试</button>}</div>}{error && <p className="error" role="alert">{error}</p>}
+      {task && <div className={`status ${task.phase}`} role="status"><progress max="100" value={task.progress} /><strong>{task.progress.toFixed(0)}% · {task.message}</strong>{task.repositoryPath && <code>{task.repositoryPath}</code>}{!isTerminalImportPhase(task.phase) && <button onClick={cancel}>取消导入</button>}{task.recoverable && <button onClick={() => { setTask(undefined); setPreview(undefined); }}>修改来源后重试</button>}</div>}{error && <p className="error" role="alert">{error}</p>}
     </section></main>;
 }
 createRoot(document.getElementById('root')!).render(<App />);

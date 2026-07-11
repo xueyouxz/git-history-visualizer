@@ -4,6 +4,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ImportService } from './import-service.js';
+import { isTerminalImportPhase, type ImportPhase } from '../shared/import.js';
 
 const json = (res: ServerResponse, status: number, body: unknown) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(body)); };
 const contentType = (file: string) => file.endsWith('.html') ? 'text/html; charset=utf-8' : file.endsWith('.js') ? 'text/javascript; charset=utf-8' : file.endsWith('.css') ? 'text/css; charset=utf-8' : 'application/octet-stream';
@@ -35,8 +36,8 @@ export function createApp(options: { managedRoot?: string; browseRoot?: string; 
           const task = imports.tasks.get(stream[1]); if (!task) return json(res, 404, { error: '任务不存在' });
           res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
           const send = (state: unknown) => res.write(`data: ${JSON.stringify(state)}\n\n`); send(task);
-          if (['complete', 'cancelled', 'error'].includes(task.phase)) { res.end(); return; }
-          const listener = (state: { phase: string }) => { send(state); if (['complete', 'cancelled', 'error'].includes(state.phase)) res.end(); };
+          if (isTerminalImportPhase(task.phase)) { res.end(); return; }
+          const listener = (state: { phase: ImportPhase }) => { send(state); if (isTerminalImportPhase(state.phase)) res.end(); };
           imports.events.on(task.id, listener); req.on('close', () => imports.events.off(task.id, listener)); return;
         }
         return json(res, 404, { error: '接口不存在' });

@@ -2,3 +2,5 @@ export type ImportPhase = 'queued' | 'cloning' | 'indexing' | 'complete' | 'canc
 export type ImportRequest = { kind: 'local' | 'remote'; source: string };
 export type ImportPreview = ImportRequest & { defaultBranch: string | null; estimatedCommitCount: number | null };
 export type TaskState = { id: string; phase: ImportPhase; progress: number; message: string; recoverable?: boolean; repositoryPath?: string };
+
+export const isTerminalImportPhase = (phase: ImportPhase) => phase === 'complete' || phase === 'cancelled' || phase === 'error';
