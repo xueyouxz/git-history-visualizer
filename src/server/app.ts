@@ -9,9 +9,9 @@ const json = (res: ServerResponse, status: number, body: unknown) => { res.write
 const contentType = (file: string) => file.endsWith('.html') ? 'text/html; charset=utf-8' : file.endsWith('.js') ? 'text/javascript; charset=utf-8' : file.endsWith('.css') ? 'text/css; charset=utf-8' : 'application/octet-stream';
 const body = async (req: IncomingMessage) => { const chunks: Buffer[] = []; for await (const chunk of req) { chunks.push(chunk); if (chunks.reduce((n, b) => n + b.length, 0) > 16_384) throw new Error('请求内容过大'); } return JSON.parse(Buffer.concat(chunks).toString('utf8')); };
 
-export function createApp(options: { managedRoot?: string; browseRoot?: string; devMiddleware?: (req: IncomingMessage, res: ServerResponse, next: () => void) => void } = {}) {
+export function createApp(options: { managedRoot?: string; browseRoot?: string; configPath?: string; devMiddleware?: (req: IncomingMessage, res: ServerResponse, next: () => void) => void } = {}) {
   const token = randomBytes(24).toString('base64url');
-  const imports = new ImportService(options.managedRoot, options.browseRoot);
+  const imports = new ImportService(options.managedRoot, options.browseRoot, options.configPath);
   const server = createServer(async (req, res) => {
     const host = req.headers.host ?? '';
     if (!/^(127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(host)) return json(res, 403, { error: 'Host 被拒绝' });
@@ -25,15 +25,18 @@ export function createApp(options: { managedRoot?: string; browseRoot?: string; 
         if (req.headers['x-session-token'] !== token) return json(res, 401, { error: '会话令牌无效' });
         if (url.pathname === '/api/browse' && req.method === 'GET') return json(res, 200, await imports.browse(url.searchParams.get('path') ?? undefined));
         if (url.pathname === '/api/settings' && req.method === 'PUT') { const data = await body(req); await imports.setRoot(data.managedRoot); return json(res, 200, { managedRoot: imports.root }); }
+        if (url.pathname === '/api/imports/preview' && req.method === 'POST') return json(res, 200, await imports.preview(await body(req)));
         if (url.pathname === '/api/imports' && req.method === 'POST') return json(res, 202, await imports.create(await body(req)));
         const match = url.pathname.match(/^\/api\/imports\/([\w-]+)$/);
         if (match && req.method === 'GET') { const task = imports.tasks.get(match[1]); return task ? json(res, 200, task) : json(res, 404, { error: '任务不存在' }); }
+        if (match && req.method === 'DELETE') { const task = await imports.cancel(match[1]); return task ? json(res, 200, task) : json(res, 404, { error: '任务不存在' }); }
         const stream = url.pathname.match(/^\/api\/imports\/([\w-]+)\/events$/);
         if (stream && req.method === 'GET') {
           const task = imports.tasks.get(stream[1]); if (!task) return json(res, 404, { error: '任务不存在' });
           res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
           const send = (state: unknown) => res.write(`data: ${JSON.stringify(state)}\n\n`); send(task);
-          const listener = (state: { phase: string }) => { send(state); if (state.phase === 'complete' || state.phase === 'error') res.end(); };
+          if (['complete', 'cancelled', 'error'].includes(task.phase)) { res.end(); return; }
+          const listener = (state: { phase: string }) => { send(state); if (['complete', 'cancelled', 'error'].includes(state.phase)) res.end(); };
           imports.events.on(task.id, listener); req.on('close', () => imports.events.off(task.id, listener)); return;
         }
         return json(res, 404, { error: '接口不存在' });
