@@ -27,6 +27,7 @@ async function createHistoryFixture() {
   await writeFile(path.join(repository, 'old name.txt'), 'rename me\n');
   await writeFile(path.join(repository, 'delete-me.txt'), 'delete me\n');
   await writeFile(path.join(repository, 'whitespace.txt'), 'value\n');
+  await writeFile(path.join(repository, 'context.txt'), Array.from({ length: 15 }, (_, index) => `line ${index + 1}`).join('\n') + '\n');
   const initial = await commit(repository, 'initial', 'Alice');
   await exec('git', ['checkout', '-b', 'feature'], { cwd: repository });
   await mkdir(path.join(repository, 'docs'));
@@ -36,6 +37,7 @@ async function createHistoryFixture() {
   await writeFile(path.join(repository, 'binary.dat'), Buffer.from([0, 1, 2, 3]));
   await writeFile(path.join(repository, 'unknown.txt'), Buffer.from([0x66, 0x6f, 0x80, 0x0a]));
   await writeFile(path.join(repository, 'whitespace.txt'), 'value    \n\n');
+  await writeFile(path.join(repository, 'context.txt'), Array.from({ length: 15 }, (_, index) => index === 7 ? 'line changed' : `line ${index + 1}`).join('\n') + '\n');
   await writeFile(path.join(repository, '.mailmap'), 'Bob <bob@example.com> Robert <robert@example.com>\n');
   const feature = await commit(repository, 'add unicode guide', 'Robert');
   await exec('git', ['tag', 'v1-feature', feature], { cwd: repository });
@@ -104,13 +106,14 @@ describe('提交历史 REST 接口', () => {
     expect(commits.find((entry: { oid: string }) => entry.oid === fixture.oids.feature)).toMatchObject({
       author: 'Bob',
       subject: 'add unicode guide',
-      additions: 17,
-      deletions: 3,
-      filesChanged: 8,
+      additions: 18,
+      deletions: 4,
+      filesChanged: 9,
     });
     expect(commits.find((entry: { oid: string }) => entry.oid === fixture.oids.feature).paths).toEqual([
       '.mailmap',
       'binary.dat',
+      'context.txt',
       'delete-me.txt',
       'docs/含 空格.md',
       'old name.txt',
@@ -140,6 +143,13 @@ describe('提交历史 REST 接口', () => {
     expect(linear.files.find((file: { path: string }) => file.path === 'delete-me.txt')).toMatchObject({ status: 'deleted' });
     expect(linear.files.find((file: { path: string }) => file.path === 'binary.dat')).toMatchObject({ binary: true, patch: '' });
     expect(linear.files.find((file: { path: string }) => file.path === 'unknown.txt')).toMatchObject({ unknownEncoding: true, patch: '' });
+    const expanded = await compare(fixture.oids.initial, fixture.oids.feature, '&expanded=true');
+    expect(expanded.files.find((file: { path: string }) => file.path === 'context.txt').patch.length)
+      .toBeGreaterThan(linear.files.find((file: { path: string }) => file.path === 'context.txt').patch.length);
+    const replacement = await compare(fixture.oids.initial, fixture.oids.feature, '&allowReplacement=true&path=unknown.txt');
+    expect(replacement.files).toHaveLength(1);
+    expect(replacement.files[0]).toMatchObject({ path: 'unknown.txt', unknownEncoding: false });
+    expect(replacement.files[0].patch).toContain('�');
 
     const diverged = await compare(fixture.oids.main, fixture.oids.feature);
     expect(diverged).toMatchObject({ relation: 'diverged', commonAncestor: fixture.oids.initial });
@@ -175,7 +185,7 @@ describe('提交历史 REST 接口', () => {
     expect((await search(`query=${encodeURIComponent('含 空格.md')}`)).map((commit: { oid: string }) => commit.oid)).toEqual([fixture.oids.merge, fixture.oids.feature]);
     expect((await search('author=Alice')).map((commit: { oid: string }) => commit.oid)).toEqual([fixture.oids.main, fixture.oids.initial]);
     expect((await search(`ref=${encodeURIComponent('refs/heads/feature')}`)).map((commit: { oid: string }) => commit.oid)).toEqual([fixture.oids.feature, fixture.oids.initial]);
-    expect((await search('changeSize=medium')).map((commit: { oid: string }) => commit.oid)).toEqual([fixture.oids.merge, fixture.oids.feature]);
+    expect((await search('changeSize=medium')).map((commit: { oid: string }) => commit.oid)).toEqual([fixture.oids.merge, fixture.oids.feature, fixture.oids.initial]);
 
     const detailResponse = await fetch(`${base}/api/repositories/fixture/commits/${fixture.oids.merge}`, { headers });
     expect(detailResponse.status).toBe(200);

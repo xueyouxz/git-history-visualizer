@@ -80,7 +80,8 @@ function parseRawDiff(output: Buffer): RawDiff[] {
   return files;
 }
 
-function decodeUtf8(buffer: Buffer) {
+function decodeUtf8(buffer: Buffer, allowReplacement = false) {
+  if (allowReplacement) return { text: buffer.toString('utf8'), unknownEncoding: false };
   try { return { text: new TextDecoder('utf-8', { fatal: true }).decode(buffer), unknownEncoding: false }; }
   catch { return { text: '', unknownEncoding: true }; }
 }
@@ -265,7 +266,7 @@ export class HistoryService {
     return { mainlineRef, nodes, edges };
   }
 
-  async compare(id: string, options: { a: string; b: string; parentIndex?: number; ignoreWhitespace?: boolean; contextLines?: number }, signal?: AbortSignal): Promise<RepositoryComparison> {
+  async compare(id: string, options: { a: string; b: string; parentIndex?: number; ignoreWhitespace?: boolean; contextLines?: number; requestedPath?: string; allowReplacement?: boolean }, signal?: AbortSignal): Promise<RepositoryComparison> {
     const index = await this.index(id, signal);
     const byOid = new Map(index.commits.map(commit => [commit.oid, commit]));
     if (!byOid.has(options.a) || !byOid.has(options.b)) throw new Error('比较提交不存在或不可达');
@@ -292,7 +293,11 @@ export class HistoryService {
     const whitespaceArgs = options.ignoreWhitespace ? ['--ignore-all-space', '--ignore-blank-lines'] : [];
     const diffArguments = ['--no-ext-diff', '--no-textconv', '-M50%', ...whitespaceArgs, effectiveA, options.b, '--'];
     const raw = await runGitBuffer(repository, ['diff', '--raw', '-z', ...diffArguments], signal);
-    const changed = parseRawDiff(raw);
+    let changed = parseRawDiff(raw);
+    if (options.requestedPath) {
+      changed = changed.filter(file => file.path === options.requestedPath || file.oldPath === options.requestedPath);
+      if (!changed.length) throw new Error('请求的差异文件不存在');
+    }
     const statistics = parseNumstat(await runGit(repository, ['diff', '--numstat', '-z', ...diffArguments], signal));
     let totalPatchBytes = 0;
     let totalTruncated = false;
@@ -310,7 +315,7 @@ export class HistoryService {
             const patchArguments = diffArguments.concat(paths);
             const patchBuffer = await runGitBuffer(repository, ['diff', '--patch', '--no-color', `--unified=${options.contextLines ?? 3}`, ...patchArguments], signal, Math.min(DIFF_LIMITS.fileBytes, remaining));
             totalPatchBytes += patchBuffer.length;
-            const decoded = decodeUtf8(patchBuffer); patch = decoded.text; unknownEncoding = decoded.unknownEncoding;
+            const decoded = decodeUtf8(patchBuffer, options.allowReplacement); patch = decoded.text; unknownEncoding = decoded.unknownEncoding;
           } catch (cause) {
             if ((cause as Error).message === 'Git 输出超过数据量上限') { truncated = true; totalTruncated = true; }
             else throw cause;
