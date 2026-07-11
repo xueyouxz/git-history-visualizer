@@ -36,6 +36,7 @@ async function createHistoryFixture() {
   await unlink(path.join(repository, 'delete-me.txt'));
   await writeFile(path.join(repository, 'binary.dat'), Buffer.from([0, 1, 2, 3]));
   await writeFile(path.join(repository, 'unknown.txt'), Buffer.from([0x66, 0x6f, 0x80, 0x0a]));
+  await writeFile(path.join(repository, 'large.txt'), 'x'.repeat(600 * 1024) + '\n');
   await writeFile(path.join(repository, 'whitespace.txt'), 'value    \n\n');
   await writeFile(path.join(repository, 'context.txt'), Array.from({ length: 15 }, (_, index) => index === 7 ? 'line changed' : `line ${index + 1}`).join('\n') + '\n');
   await writeFile(path.join(repository, '.mailmap'), 'Bob <bob@example.com> Robert <robert@example.com>\n');
@@ -106,9 +107,9 @@ describe('提交历史 REST 接口', () => {
     expect(commits.find((entry: { oid: string }) => entry.oid === fixture.oids.feature)).toMatchObject({
       author: 'Bob',
       subject: 'add unicode guide',
-      additions: 18,
+      additions: 19,
       deletions: 4,
-      filesChanged: 9,
+      filesChanged: 10,
     });
     expect(commits.find((entry: { oid: string }) => entry.oid === fixture.oids.feature).paths).toEqual([
       '.mailmap',
@@ -116,6 +117,7 @@ describe('提交历史 REST 接口', () => {
       'context.txt',
       'delete-me.txt',
       'docs/含 空格.md',
+      'large.txt',
       'old name.txt',
       'renamed.txt',
       'unknown.txt',
@@ -143,6 +145,11 @@ describe('提交历史 REST 接口', () => {
     expect(linear.files.find((file: { path: string }) => file.path === 'delete-me.txt')).toMatchObject({ status: 'deleted' });
     expect(linear.files.find((file: { path: string }) => file.path === 'binary.dat')).toMatchObject({ binary: true, patch: '' });
     expect(linear.files.find((file: { path: string }) => file.path === 'unknown.txt')).toMatchObject({ unknownEncoding: true, patch: '' });
+    expect(linear.files.find((file: { path: string }) => file.path === 'large.txt')).toMatchObject({ truncated: true, patch: '' });
+    const recoveredLarge = await compare(fixture.oids.initial, fixture.oids.feature, '&path=large.txt');
+    expect(recoveredLarge.files).toHaveLength(1);
+    expect(recoveredLarge.files[0]).toMatchObject({ path: 'large.txt', truncated: false });
+    expect(recoveredLarge.files[0].patch.length).toBeGreaterThan(512 * 1024);
     const expanded = await compare(fixture.oids.initial, fixture.oids.feature, '&expanded=true');
     expect(expanded.files.find((file: { path: string }) => file.path === 'context.txt').patch.length)
       .toBeGreaterThan(linear.files.find((file: { path: string }) => file.path === 'context.txt').patch.length);

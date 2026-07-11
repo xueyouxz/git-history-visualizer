@@ -313,7 +313,8 @@ export class HistoryService {
         else {
           try {
             const patchArguments = diffArguments.concat(paths);
-            const patchBuffer = await runGitBuffer(repository, ['diff', '--patch', '--no-color', `--unified=${options.contextLines ?? 3}`, ...patchArguments], signal, Math.min(DIFF_LIMITS.fileBytes, remaining));
+            const fileLimit = options.requestedPath ? DIFF_LIMITS.recoveryFileBytes : DIFF_LIMITS.fileBytes;
+            const patchBuffer = await runGitBuffer(repository, ['diff', '--patch', '--no-color', `--unified=${options.contextLines ?? 3}`, ...patchArguments], signal, Math.min(fileLimit, remaining));
             totalPatchBytes += patchBuffer.length;
             const decoded = decodeUtf8(patchBuffer, options.allowReplacement); patch = decoded.text; unknownEncoding = decoded.unknownEncoding;
           } catch (cause) {

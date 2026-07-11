@@ -11,10 +11,10 @@ const extensionOf = (file: string) => {
   return dot > 0 ? name.slice(dot).toLocaleLowerCase() : '无扩展名';
 };
 
-function Patch({ file, view, expanded, onUnknownEncoding, onTruncated }: { file: DiffFile; view: DiffView; expanded: boolean; onUnknownEncoding: () => void; onTruncated: () => void }) {
+function Patch({ file, view, expanded, recovering, onUnknownEncoding, onTruncated }: { file: DiffFile; view: DiffView; expanded: boolean; recovering: boolean; onUnknownEncoding: () => void; onTruncated: () => void }) {
   if (file.binary) return <p className="diff-notice">二进制文件，只显示元数据。+{file.additions}/-{file.deletions}</p>;
   if (file.unknownEncoding) return <p className="diff-notice error">无法按 UTF-8 解码，已保留元数据。 <button onClick={onUnknownEncoding}>替换无效字节后查看</button></p>;
-  if (file.truncated) return <p className="diff-notice error">单文件或总差异超过数据量上限，正文未加载。 <button onClick={onTruncated}>单独加载此文件</button></p>;
+  if (file.truncated) return <p className="diff-notice error">{recovering ? '单文件超过 2 MiB 恢复硬上限，请使用外部 Git 查看。' : <>单文件或总差异超过数据量上限，正文未加载。 <button onClick={onTruncated}>单独加载此文件</button></>}</p>;
   const allLines = file.patch.split('\n');
   const lines = expanded ? allLines : allLines.filter(line => /^(diff |index |--- |\+\+\+ |@@|\+|-)/.test(line));
   if (view === 'unified') return <pre className="unified-diff">{lines.join('\n')}</pre>;
@@ -94,7 +94,7 @@ export function DiffInspector({ api }: { api: Api }) {
         {comparison.truncated && <p className="error">总差异超过上限，已保留已加载的文件和元数据。可在截断文件上选择单独加载。</p>}
         {recoveryPath && <p className="comparison-path">正在单独查看 <code>{recoveryPath}</code>。 <button onClick={() => setRecoveryPath('')}>返回全部文件</button></p>}
         <label>文件类型<select value={fileType} onChange={event => setFileType(event.target.value)}><option value="">全部类型</option>{types.map(type => <option key={type}>{type}</option>)}</select></label>
-        <div className="diff-files">{[...directories].map(([directory, files]) => <details key={directory} open><summary>{directory}（{files.length}）</summary>{files.map(file => <article className="diff-file" key={`${file.oldPath ?? ''}-${file.path}`}><h3>{file.status === 'renamed' ? `${file.oldPath} → ${file.path}` : file.path}</h3><p className="file-meta">{file.status === 'renamed' ? `推断重命名，${file.similarity}% 相似` : file.status} · +{file.additions}/-{file.deletions}</p><Patch file={file} view={view} expanded={expanded} onUnknownEncoding={() => setAllowReplacement(true)} onTruncated={() => setRecoveryPath(file.path)} /></article>)}</details>)}</div>
+        <div className="diff-files">{[...directories].map(([directory, files]) => <details key={directory} open><summary>{directory}（{files.length}）</summary>{files.map(file => <article className="diff-file" key={`${file.oldPath ?? ''}-${file.path}`}><h3>{file.status === 'renamed' ? `${file.oldPath} → ${file.path}` : file.path}</h3><p className="file-meta">{file.status === 'renamed' ? `推断重命名，${file.similarity}% 相似` : file.status} · +{file.additions}/-{file.deletions}</p><Patch file={file} view={view} expanded={expanded} recovering={Boolean(recoveryPath)} onUnknownEncoding={() => setAllowReplacement(true)} onTruncated={() => setRecoveryPath(file.path)} /></article>)}</details>)}</div>
       </>}
     </>}
   </section>;
