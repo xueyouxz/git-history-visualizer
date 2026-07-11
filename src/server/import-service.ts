@@ -88,7 +88,7 @@ export class ImportService {
     }
     this.managedRoot = resolvedRoot;
   }
-  async browse(input = homedir()) {
+  async browse(input = this.browseRoot) {
     const root = await fs.realpath(this.browseRoot);
     const target = await fs.realpath(path.resolve(input));
     if (target !== root && !target.startsWith(root + path.sep)) throw new Error('目录超出允许浏览范围');

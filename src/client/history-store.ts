@@ -1,0 +1,75 @@
+import { create } from 'zustand';
+import type { ChangeSizeFilter, IndexedCommit, RepositoryRef, RepositorySummary, RepositoryTopology } from '../shared/history';
+export type SemanticZoom = 'global' | 'intermediate' | 'detail';
+
+type HistoryState = {
+  repositories: RepositorySummary[];
+  repositoryId: string;
+  range: 'all';
+  allCommits: IndexedCommit[];
+  commits: IndexedCommit[];
+  refs: RepositoryRef[];
+  topology?: RepositoryTopology;
+  selectedOid: string;
+  hoveredOid: string;
+  mainlineRef: string;
+  query: string;
+  author: string;
+  refFilter: string;
+  changeSize: ChangeSizeFilter;
+  semanticZoom: SemanticZoom;
+  boxedOids: string[];
+  setRepositories: (repositories: RepositorySummary[]) => void;
+  openRepository: (repositoryId: string) => void;
+  setHistory: (commits: IndexedCommit[], refs: RepositoryRef[], topology: RepositoryTopology) => void;
+  setCommits: (commits: IndexedCommit[]) => void;
+  setTopology: (topology: RepositoryTopology) => void;
+  select: (oid: string) => void;
+  hover: (oid: string) => void;
+  setMainlineRef: (mainlineRef: string) => void;
+  setQuery: (query: string) => void;
+  setAuthor: (author: string) => void;
+  setRefFilter: (refFilter: string) => void;
+  setChangeSize: (changeSize: ChangeSizeFilter) => void;
+  setSemanticZoom: (semanticZoom: SemanticZoom) => void;
+  setBoxedOids: (boxedOids: string[]) => void;
+};
+
+export const useHistoryStore = create<HistoryState>(set => ({
+  repositories: [],
+  repositoryId: '',
+  range: 'all',
+  allCommits: [],
+  commits: [],
+  refs: [],
+  selectedOid: '',
+  hoveredOid: '',
+  mainlineRef: '',
+  query: '',
+  author: '',
+  refFilter: '',
+  changeSize: '',
+  semanticZoom: 'intermediate',
+  boxedOids: [],
+  setRepositories: repositories => set({ repositories }),
+  openRepository: repositoryId => set({ repositoryId, selectedOid: '', hoveredOid: '', boxedOids: [], query: '', author: '', refFilter: '', changeSize: '' }),
+  setHistory: (commits, refs, topology) => set({ allCommits: commits, commits, refs, topology, mainlineRef: topology.mainlineRef, selectedOid: commits[0]?.oid ?? '' }),
+  setCommits: commits => set(state => {
+    const visible = new Set(commits.map(commit => commit.oid));
+    return {
+      commits,
+      selectedOid: visible.has(state.selectedOid) ? state.selectedOid : commits[0]?.oid ?? '',
+      boxedOids: state.boxedOids.filter(oid => visible.has(oid)),
+    };
+  }),
+  setTopology: topology => set({ topology, mainlineRef: topology.mainlineRef }),
+  select: selectedOid => set({ selectedOid }),
+  hover: hoveredOid => set({ hoveredOid }),
+  setMainlineRef: mainlineRef => set({ mainlineRef }),
+  setQuery: query => set({ query }),
+  setAuthor: author => set({ author }),
+  setRefFilter: refFilter => set({ refFilter }),
+  setChangeSize: changeSize => set({ changeSize }),
+  setSemanticZoom: semanticZoom => set({ semanticZoom }),
+  setBoxedOids: boxedOids => set({ boxedOids }),
+}));

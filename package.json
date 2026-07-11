@@ -2,22 +2,29 @@
   "name": "git-history-visualizer",
   "private": true,
   "type": "module",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "scripts": {
     "dev": "tsx src/server/main.ts",
     "build": "vite build && tsc --noEmit",
     "start": "NODE_ENV=production tsx src/server/main.ts",
     "test": "vitest run",
-    "test:e2e": "vitest run test/import.e2e.test.ts"
+    "test:e2e": "vitest run test/import.e2e.test.ts test/history.e2e.test.ts && playwright test",
+    "test:browser": "playwright test"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
-    "vite": "latest",
+    "d3": "^7.9.0",
     "react": "latest",
     "react-dom": "latest",
-    "tsx": "latest"
+    "tsx": "latest",
+    "vite": "latest",
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
+    "@types/d3": "^7.4.3",
     "@types/node": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",

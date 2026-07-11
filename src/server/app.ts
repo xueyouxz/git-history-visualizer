@@ -4,6 +4,7 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ImportService } from './import-service.js';
+import { HistoryService } from './history-service.js';
 import { isTerminalImportPhase, type ImportPhase } from '../shared/import.js';
 
 const json = (res: ServerResponse, status: number, body: unknown) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(body)); };
@@ -13,6 +14,7 @@ const body = async (req: IncomingMessage) => { const chunks: Buffer[] = []; for 
 export function createApp(options: { managedRoot?: string; browseRoot?: string; configPath?: string; devMiddleware?: (req: IncomingMessage, res: ServerResponse, next: () => void) => void } = {}) {
   const token = randomBytes(24).toString('base64url');
   const imports = new ImportService(options.managedRoot, options.browseRoot, options.configPath);
+  const history = new HistoryService(() => imports.root);
   const server = createServer(async (req, res) => {
     const host = req.headers.host ?? '';
     if (!/^(127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(host)) return json(res, 403, { error: 'Host 被拒绝' });
@@ -20,10 +22,28 @@ export function createApp(options: { managedRoot?: string; browseRoot?: string; 
     if (origin && origin !== `http://${host}`) return json(res, 403, { error: 'Origin 被拒绝' });
     if (!['GET', 'HEAD'].includes(req.method ?? '') && origin !== `http://${host}`) return json(res, 403, { error: '写请求必须来自当前应用' });
     const url = new URL(req.url ?? '/', `http://${host}`);
+    const requestController = new AbortController();
+    req.once('aborted', () => requestController.abort());
     try {
       if (url.pathname === '/api/session' && req.method === 'GET') return json(res, 200, { token, managedRoot: imports.root });
       if (url.pathname.startsWith('/api/')) {
         if (req.headers['x-session-token'] !== token) return json(res, 401, { error: '会话令牌无效' });
+        if (url.pathname === '/api/repositories' && req.method === 'GET') return json(res, 200, await history.list(requestController.signal));
+        const repositoryRoute = url.pathname.match(/^\/api\/repositories\/([^/]+)(?:\/(refs|commits))?$/);
+        if (repositoryRoute && req.method === 'GET') {
+          const id = decodeURIComponent(repositoryRoute[1]);
+          const index = await history.index(id, requestController.signal);
+          if (!repositoryRoute[2]) return json(res, 200, index);
+          if (repositoryRoute[2] === 'refs') return json(res, 200, index.refs);
+          return json(res, 200, await history.search(id, url.searchParams, requestController.signal));
+        }
+        const topologyRoute = url.pathname.match(/^\/api\/repositories\/([^/]+)\/topology$/);
+        if (topologyRoute && req.method === 'GET') return json(res, 200, await history.topology(decodeURIComponent(topologyRoute[1]), url.searchParams.get('mainlineRef'), requestController.signal));
+        const commitRoute = url.pathname.match(/^\/api\/repositories\/([^/]+)\/commits\/([0-9a-f]{40,64})$/);
+        if (commitRoute && req.method === 'GET') {
+          const commit = await history.commit(decodeURIComponent(commitRoute[1]), commitRoute[2], requestController.signal);
+          return commit ? json(res, 200, commit) : json(res, 404, { error: '提交不存在' });
+        }
         if (url.pathname === '/api/browse' && req.method === 'GET') return json(res, 200, await imports.browse(url.searchParams.get('path') ?? undefined));
         if (url.pathname === '/api/settings' && req.method === 'PUT') { const data = await body(req); await imports.setRoot(data.managedRoot); return json(res, 200, { managedRoot: imports.root }); }
         if (url.pathname === '/api/imports/preview' && req.method === 'POST') return json(res, 200, await imports.preview(await body(req)));
@@ -51,5 +71,5 @@ export function createApp(options: { managedRoot?: string; browseRoot?: string; 
       res.writeHead(200, { 'Content-Type': contentType(asset), 'X-Content-Type-Options': 'nosniff' }); res.end(content);
     } catch (cause) { json(res, 400, { error: cause instanceof Error ? cause.message : '请求失败' }); }
   });
-  return { server, imports, token };
+  return { server, imports, history, token };
 }
