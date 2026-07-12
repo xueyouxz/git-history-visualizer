@@ -15,6 +15,8 @@ type HistoryState = {
   aOid: string;
   bOid: string;
   hoveredOid: string;
+  highlightedPath: string;
+  highlightedOids: string[];
   mainlineRef: string;
   query: string;
   author: string;
@@ -34,6 +36,7 @@ type HistoryState = {
   clearAB: () => void;
   restoreUrlState: (urlState: HistoryUrlState) => void;
   hover: (oid: string) => void;
+  highlightPath: (path: string) => void;
   setMainlineRef: (mainlineRef: string) => void;
   setQuery: (query: string) => void;
   setAuthor: (author: string) => void;
@@ -54,6 +57,8 @@ export const useHistoryStore = create<HistoryState>(set => ({
   aOid: '',
   bOid: '',
   hoveredOid: '',
+  highlightedPath: '',
+  highlightedOids: [],
   mainlineRef: '',
   query: '',
   author: '',
@@ -62,7 +67,7 @@ export const useHistoryStore = create<HistoryState>(set => ({
   semanticZoom: 'intermediate',
   boxedOids: [],
   setRepositories: repositories => set({ repositories }),
-  openRepository: repositoryId => set({ repositoryId, selectedOid: '', aOid: '', bOid: '', hoveredOid: '', boxedOids: [], query: '', author: '', refFilter: '', changeSize: '' }),
+  openRepository: repositoryId => set({ repositoryId, selectedOid: '', aOid: '', bOid: '', hoveredOid: '', highlightedPath: '', highlightedOids: [], boxedOids: [], query: '', author: '', refFilter: '', changeSize: '' }),
   setHistory: (commits, refs, topology) => set(state => {
     const available = new Set(commits.map(commit => commit.oid));
     return {
@@ -88,6 +93,10 @@ export const useHistoryStore = create<HistoryState>(set => ({
   clearAB: () => set({ aOid: '', bOid: '' }),
   restoreUrlState: urlState => set(urlState),
   hover: hoveredOid => set({ hoveredOid }),
+  highlightPath: highlightedPath => set(state => ({
+    highlightedPath,
+    highlightedOids: highlightedPath ? state.allCommits.filter(commit => commit.paths.some(path => path === highlightedPath || path.startsWith(`${highlightedPath}/`))).map(commit => commit.oid) : [],
+  })),
   setMainlineRef: mainlineRef => set({ mainlineRef }),
   setQuery: query => set({ query }),
   setAuthor: author => set({ author }),

@@ -52,6 +52,7 @@ progress { width: 100%; accent-color: #245f89; }
 .commit-node .mainline { fill: #fffdf8; stroke: #245f89; }
 .commit-node .branch { fill: #fffdf8; stroke: #8b5a2b; }
 .commit-node.related circle { fill: #dbe9f1; }
+.commit-node.path-related circle { fill: #f0c86c; stroke-width: 4; }
 .commit-node.selected circle { fill: #245f89; stroke: #17202a; }
 .ab-marker { pointer-events: none; }
 .ab-marker rect, .ab-marker path { fill: #fffdf8; stroke: #17202a; stroke-width: 2.5; vector-effect: non-scaling-stroke; }
@@ -70,7 +71,32 @@ progress { width: 100%; accent-color: #245f89; }
 .graph-summary summary { cursor: pointer; font-weight: 700; }
 .graph-summary ol { margin: 8px 0 0; padding-left: 22px; }
 .graph-summary button { width: 100%; border: 0; padding: 4px; text-align: left; font-size: 11px; }
-.diff-inspector { grid-column: 2 / 4; min-width: 0; overflow: auto; padding: 14px 16px 20px; background: #fffdf8; border-top: 1px solid #aeb5b9; }
+.analysis-dock { grid-column: 2 / 4; min-width: 0; overflow: auto; background: #fffdf8; border-top: 1px solid #aeb5b9; }
+.dock-tabs { position: sticky; top: 0; z-index: 5; display: flex; gap: 4px; padding: 7px 16px; background: #fffdf8; border-bottom: 1px solid #d3d7d9; }
+.dock-tabs button { padding: 5px 12px; }
+.dock-tabs button[aria-selected="true"] { color: #fff; background: #245f89; border-color: #245f89; }
+.diff-inspector { min-width: 0; overflow: auto; padding: 14px 16px 20px; background: #fffdf8; }
+.code-map-panel { padding: 10px 16px 18px; }
+.code-map-toolbar { display: flex; align-items: center; gap: 10px; }
+.code-map-toolbar p { margin: 0 auto 0 0; }
+.code-map-toolbar label { display: flex; align-items: center; gap: 6px; }
+.code-map-toolbar select { width: auto; min-height: 32px; padding: 4px 8px; }
+.code-map-toolbar button, .breadcrumbs button { padding: 4px 8px; }
+.breadcrumbs { margin: 8px 0; font-size: 12px; }
+.code-map-legend { display: flex; gap: 12px; margin-bottom: 7px; font-size: 11px; }
+.code-map-legend span::before { display: inline-block; width: 12px; height: 10px; margin-right: 4px; border: 2px solid #59666d; content: ""; vertical-align: -1px; }
+.legend-added::before, .map-file.added { background: #d7ead3; border-style: solid; }
+.legend-modified::before, .map-file.modified { background: #f4dda2; border-style: dashed; }
+.legend-deleted::before, .map-file.deleted { background: repeating-linear-gradient(135deg, #f1cbc5 0 5px, #fffdf8 5px 9px); border-style: double; }
+.legend-renamed::before, .map-file.renamed { background: repeating-linear-gradient(45deg, #dbe9f1 0 4px, #fffdf8 4px 8px); border-width: 3px; }
+.legend-unchanged::before, .map-file.unchanged { background: #eef0ec; }
+.code-map-canvas { position: relative; height: 300px; overflow: hidden; border: 1px solid #89959c; background: #fffdf8; }
+.map-file { position: absolute; z-index: 1; min-width: 2px; min-height: 2px; padding: 5px; overflow: hidden; border-radius: 0; text-align: left; }
+.map-file span, .map-file small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.map-file span { font-size: 11px; font-weight: 700; }
+.map-file small { font-size: 10px; }
+.map-directory { position: absolute; z-index: 2; border: 2px solid #245f89; pointer-events: none; }
+.map-directory > button { height: 20px; padding: 1px 5px; border: 0; border-radius: 0; background: #245f89; color: #fff; font-size: 10px; pointer-events: auto; }
 .ab-actions, .diff-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .ab-actions button { padding: 5px 9px; font-size: 12px; }
 .ab-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0; }

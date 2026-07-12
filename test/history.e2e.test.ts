@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { mkdir, mkdtemp, rename, rm, unlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
@@ -77,6 +77,24 @@ afterAll(async () => {
 });
 
 describe('提交历史 REST 接口', () => {
+  it('按提交读取真实 tree、blob 字节数及 Unicode 和空格路径', async () => {
+    const fixture = sharedFixture;
+    const { base, headers } = sharedApp;
+    const response = await fetch(`${base}/api/repositories/fixture/tree?oid=${fixture.oids.feature}&path=`, { headers });
+    expect(response.status).toBe(200);
+    const tree = await response.json();
+    expect(tree).toMatchObject({ oid: fixture.oids.feature, path: '' });
+    expect(tree.entries.find((entry: { path: string }) => entry.path === 'docs')).toMatchObject({ type: 'tree' });
+    expect(tree.entries.find((entry: { path: string }) => entry.path === 'docs/含 空格.md')).toMatchObject({ type: 'blob', bytes: 111 });
+    expect(tree.entries.find((entry: { path: string }) => entry.path === 'binary.dat')).toMatchObject({ type: 'blob', bytes: 4 });
+    expect(tree.entries.some((entry: { path: string }) => entry.path.includes('..'))).toBe(false);
+
+    const nested = await fetch(`${base}/api/repositories/fixture/tree?oid=${fixture.oids.feature}&path=${encodeURIComponent('docs')}`, { headers }).then(result => result.json());
+    expect(nested.entries.map((entry: { path: string }) => entry.path)).toEqual(['docs/含 空格.md']);
+    const invalid = await fetch(`${base}/api/repositories/fixture/tree?oid=${fixture.oids.feature}&path=${encodeURIComponent('../.git')}`, { headers });
+    expect(invalid.status).toBe(400);
+  }, 15_000);
+
   it('索引真实可达提交、公开 refs、作者、路径和变更统计', async () => {
     const fixture = sharedFixture;
     const { base, headers } = sharedApp;
@@ -226,5 +244,22 @@ describe('提交历史 REST 接口', () => {
       fixture.oids.initial,
     ]);
 
+  }, 15_000);
+
+  it('公开 refs 变化时更新修订指纹，并在仓库外按版本缓存索引', async () => {
+    const fixture = sharedFixture;
+    const { base, headers } = sharedApp;
+    const readIndex = () => fetch(`${base}/api/repositories/fixture`, { headers }).then(response => response.json());
+    const first = await readIndex();
+    expect(first.revisionFingerprint).toMatch(/^[0-9a-f]{64}$/);
+    await access(path.join(fixture.managedRoot, '.ghv-cache', 'fixture', first.revisionFingerprint, 'index-v1.json'));
+
+    await exec('git', ['update-ref', 'refs/tags/cache-test', fixture.oids.feature], { cwd: fixture.repository });
+    const changed = await readIndex();
+    expect(changed.revisionFingerprint).not.toBe(first.revisionFingerprint);
+    expect(changed.refs.some((ref: { name: string }) => ref.name === 'refs/tags/cache-test')).toBe(true);
+
+    await exec('git', ['update-ref', '-d', 'refs/tags/cache-test'], { cwd: fixture.repository });
+    expect((await readIndex()).revisionFingerprint).toBe(first.revisionFingerprint);
   }, 15_000);
 });

@@ -1,4 +1,5 @@
 import { spawn } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
@@ -12,6 +13,7 @@ import {
   type RepositorySummary,
   type RepositoryTopology,
   type RepositoryComparison,
+  type RepositoryTree,
 } from '../shared/history.js';
 
 const gitEnvironment = {
@@ -170,17 +172,30 @@ export class HistoryService {
   }
 
   async index(id: string, signal?: AbortSignal): Promise<RepositoryIndex> {
-    const cached = this.indexes.get(id);
-    if (cached) return cached;
-    const index = await this.buildIndex(id, signal);
-    this.indexes.set(id, index);
-    return index;
-  }
-
-  private async buildIndex(id: string, signal?: AbortSignal): Promise<RepositoryIndex> {
     const repository = await this.repositoryPath(id);
     const refs = await readRefs(repository, signal);
     if (!refs.length) throw new Error('仓库没有可索引的公开引用');
+    const revisionFingerprint = createHash('sha256').update(refs.map(ref => `${ref.name}\0${ref.oid}`).join('\n')).digest('hex');
+    const cacheKey = `${id}:${revisionFingerprint}:${REPOSITORY_INDEX_VERSION}`;
+    const cached = this.indexes.get(cacheKey);
+    if (cached) return cached;
+    const cacheDirectory = path.join(path.resolve(this.managedRoot()), '.ghv-cache', id, revisionFingerprint);
+    const cacheFile = path.join(cacheDirectory, `index-v${REPOSITORY_INDEX_VERSION}.json`);
+    const stored = await fs.readFile(cacheFile, 'utf8').then(value => JSON.parse(value) as RepositoryIndex).catch(() => undefined);
+    if (stored?.version === REPOSITORY_INDEX_VERSION && stored.id === id && stored.revisionFingerprint === revisionFingerprint) {
+      this.indexes.set(cacheKey, stored);
+      return stored;
+    }
+    const index = await this.buildIndex(id, repository, refs, revisionFingerprint, signal);
+    await fs.mkdir(cacheDirectory, { recursive: true });
+    const temporary = `${cacheFile}.${randomUUID()}.tmp`;
+    await fs.writeFile(temporary, JSON.stringify(index));
+    await fs.rename(temporary, cacheFile);
+    this.indexes.set(cacheKey, index);
+    return index;
+  }
+
+  private async buildIndex(id: string, repository: string, refs: RepositoryRef[], revisionFingerprint: string, signal?: AbortSignal): Promise<RepositoryIndex> {
     const roots = [...new Set(refs.map(ref => ref.oid))];
     const graph = await runGit(repository, ['rev-list', '--topo-order', '--parents', ...roots], signal);
     const rows = graph.trim().split('\n').filter(Boolean).map(row => row.split(' '));
@@ -190,7 +205,7 @@ export class HistoryService {
     const defaultRef = refs.some(ref => ref.name === symbolicHead)
       ? symbolicHead
       : refs.find(ref => ref.kind === 'head')?.name ?? refs[0].name;
-    return { version: REPOSITORY_INDEX_VERSION, id, name: path.basename(repository), defaultRef, refs, commits };
+    return { version: REPOSITORY_INDEX_VERSION, id, name: path.basename(repository), revisionFingerprint, defaultRef, refs, commits };
   }
 
   async commit(id: string, oid: string, signal?: AbortSignal) {
@@ -264,6 +279,28 @@ export class HistoryService {
     });
     const edges = index.commits.flatMap(commit => commit.parents.map(parent => ({ from: commit.oid, to: parent })));
     return { mainlineRef, nodes, edges };
+  }
+
+  async tree(id: string, oid: string, requestedPath = '', signal?: AbortSignal): Promise<RepositoryTree> {
+    const index = await this.index(id, signal);
+    if (!index.commits.some(commit => commit.oid === oid)) throw new Error('树提交不存在或不可达');
+    if (requestedPath.length > 4_096 || requestedPath.includes('\0') || path.posix.isAbsolute(requestedPath)) throw new Error('树路径无效');
+    const normalizedPath = requestedPath ? path.posix.normalize(requestedPath) : '';
+    if (normalizedPath === '.' || normalizedPath === '..' || normalizedPath.startsWith('../') || normalizedPath !== requestedPath.replace(/\/$/, '')) throw new Error('树路径无效');
+    const repository = await this.repositoryPath(id);
+    const args = ['ls-tree', '-r', '-t', '-z', '-l', oid];
+    if (normalizedPath) args.push('--', normalizedPath);
+    const output = await runGitBuffer(repository, args, signal, 16 * 1024 * 1024);
+    const entries = output.toString('utf8').split('\0').filter(Boolean).map(record => {
+      const separator = record.indexOf('\t');
+      if (separator < 0) throw new Error('无法解析 Git tree');
+      const [mode, type, objectOid, size] = record.slice(0, separator).trim().split(/\s+/);
+      const entryPath = record.slice(separator + 1);
+      if (!mode || !objectOid || (type !== 'tree' && type !== 'blob')) throw new Error('无法解析 Git tree');
+      return { path: entryPath, type: type as 'tree' | 'blob', oid: objectOid, ...(type === 'blob' ? { bytes: Number(size) } : {}) };
+    }).filter(entry => entry.path !== normalizedPath)
+      .sort((left, right) => left.path.localeCompare(right.path, 'en'));
+    return { oid, path: normalizedPath, entries };
   }
 
   async compare(id: string, options: { a: string; b: string; parentIndex?: number; ignoreWhitespace?: boolean; contextLines?: number; requestedPath?: string; allowReplacement?: boolean }, signal?: AbortSignal): Promise<RepositoryComparison> {

@@ -39,6 +39,12 @@ export function createApp(options: { managedRoot?: string; browseRoot?: string; 
         }
         const topologyRoute = url.pathname.match(/^\/api\/repositories\/([^/]+)\/topology$/);
         if (topologyRoute && req.method === 'GET') return json(res, 200, await history.topology(decodeURIComponent(topologyRoute[1]), url.searchParams.get('mainlineRef'), requestController.signal));
+        const treeRoute = url.pathname.match(/^\/api\/repositories\/([^/]+)\/tree$/);
+        if (treeRoute && req.method === 'GET') {
+          const oid = url.searchParams.get('oid') ?? '';
+          if (!/^[0-9a-f]{40,64}$/.test(oid)) return json(res, 400, { error: '树提交无效' });
+          return json(res, 200, await history.tree(decodeURIComponent(treeRoute[1]), oid, url.searchParams.get('path') ?? '', requestController.signal));
+        }
         const diffRoute = url.pathname.match(/^\/api\/repositories\/([^/]+)\/diff$/);
         if (diffRoute && req.method === 'GET') {
           const a = url.searchParams.get('a') ?? ''; const b = url.searchParams.get('b') ?? '';

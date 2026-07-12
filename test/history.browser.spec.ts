@@ -128,3 +128,40 @@ test('设置、交换、清除并恢复 A/B，显示非颜色标记和文件差�
   await expect(page.locator('.ab-summary')).toContainText('initial');
   await expect(page.locator('.ab-summary')).toContainText('add unicode guide');
 });
+
+test('代码地图支持下钻、跨视图联动和可中断的确定性播放', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Git 历史可视化' })).toBeVisible({ timeout: 15_000 });
+  await page.getByRole('tab', { name: '代码地图' }).click();
+  await expect(page.getByText('面积表示 Git blob 字节数')).toBeVisible();
+  await expect(page.getByRole('button', { name: /README.md.*字节/ })).toBeVisible();
+
+  await page.getByRole('button', { name: /目录 docs/ }).click();
+  await expect(page.getByRole('navigation', { name: '代码地图路径' })).toContainText('docs');
+  await expect(page.getByRole('button', { name: /含 空格.md.*字节/ })).toBeVisible();
+  await page.getByRole('button', { name: /含 空格.md.*字节/ }).hover();
+  await expect(page.locator('.commit-node.path-related')).toHaveCount(2);
+  await page.getByRole('button', { name: '根目录' }).click();
+
+  const selectedSubject = page.locator('.inspector h2');
+  await page.getByRole('button', { name: '播放主线路径' }).click();
+  await expect(selectedSubject).toHaveText('initial');
+  await page.getByRole('button', { name: '暂停播放' }).click();
+  const paused = await selectedSubject.textContent();
+  await page.waitForTimeout(350);
+  await expect(selectedSubject).toHaveText(paused ?? '');
+  await page.getByRole('button', { name: '继续播放' }).click();
+  await expect(selectedSubject).toHaveText('merge feature', { timeout: 5_000 });
+  await expect(page.locator('.code-map-canvas')).toHaveAttribute('aria-label', '8 个文件的代码地图');
+  const completedLayout = await page.locator('.map-file').evaluateAll(files => files.map(file => ({ label: file.getAttribute('aria-label'), style: file.getAttribute('style') })));
+  await page.getByRole('button', { name: '播放主线路径' }).click();
+  await expect(selectedSubject).toHaveText('initial');
+  await expect(selectedSubject).toHaveText('merge feature', { timeout: 5_000 });
+  await expect.poll(() => page.locator('.map-file').evaluateAll(files => files.map(file => ({ label: file.getAttribute('aria-label'), style: file.getAttribute('style') })))).toEqual(completedLayout);
+  await page.getByRole('button', { name: '播放主线路径' }).click();
+  await expect(selectedSubject).toHaveText('initial');
+  await page.getByRole('button', { name: '取消播放' }).click();
+  await page.waitForTimeout(350);
+  await expect(selectedSubject).toHaveText('initial');
+});

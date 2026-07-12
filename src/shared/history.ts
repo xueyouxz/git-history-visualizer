@@ -28,6 +28,7 @@ export type RepositoryIndex = {
   version: typeof REPOSITORY_INDEX_VERSION;
   id: string;
   name: string;
+  revisionFingerprint: string;
   defaultRef: string;
   refs: RepositoryRef[];
   commits: IndexedCommit[];
@@ -50,6 +51,19 @@ export type RepositoryTopology = {
   mainlineRef: string;
   nodes: TopologyNode[];
   edges: TopologyEdge[];
+};
+
+export type RepositoryTreeEntry = {
+  path: string;
+  type: 'tree' | 'blob';
+  oid: string;
+  bytes?: number;
+};
+
+export type RepositoryTree = {
+  oid: string;
+  path: string;
+  entries: RepositoryTreeEntry[];
 };
 
 export const DIFF_LIMITS = { fileBytes: 512 * 1024, recoveryFileBytes: 2 * 1024 * 1024, totalBytes: 2 * 1024 * 1024 } as const;
