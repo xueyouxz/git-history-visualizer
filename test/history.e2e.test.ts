@@ -300,4 +300,22 @@ describe('提交历史 REST 接口', () => {
     expect(filtered.points).toHaveLength(2);
     expect(filtered.contributors).toEqual([{ authorId: bobCommits[0].authorId, name: 'Bob', aggregate: false }]);
   }, 15_000);
+
+  it('返回版本化分类、使用仓库外缓存并按多个类型筛选', async () => {
+    const fixture = sharedFixture;
+    const { base, headers } = sharedApp;
+    const index = await fetch(`${base}/api/repositories/fixture`, { headers }).then(response => response.json());
+    const response = await fetch(`${base}/api/repositories/fixture/classifications?version=1`, { headers });
+    expect(response.status).toBe(200);
+    const classifications = await response.json();
+    expect(classifications).toMatchObject({ version: 1, revisionFingerprint: index.revisionFingerprint });
+    expect(classifications.results).toHaveLength(index.commits.length);
+    expect(classifications.results.find((result: { oid: string }) => result.oid === fixture.oids.merge)).toMatchObject({ type: 'merge', confidence: 1 });
+    await access(path.join(fixture.managedRoot, '.ghv-cache', 'fixture', index.revisionFingerprint, 'classifications-v1.json'));
+
+    const filtered = await fetch(`${base}/api/repositories/fixture/commits?classification=merge&classification=docs`, { headers }).then(result => result.json());
+    expect(filtered.some((commit: { oid: string }) => commit.oid === fixture.oids.merge)).toBe(true);
+    const byOid = new Map(classifications.results.map((result: { oid: string; type: string }) => [result.oid, result.type]));
+    expect(filtered.every((commit: { oid: string }) => ['merge', 'docs'].includes(byOid.get(commit.oid) as string))).toBe(true);
+  }, 15_000);
 });

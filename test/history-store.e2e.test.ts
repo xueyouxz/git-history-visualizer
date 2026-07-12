@@ -32,3 +32,16 @@ describe('贡献者联动状态', () => {
     expect(useHistoryStore.getState()).toMatchObject({ selectedContributorId: '', contributorHighlightOids: [], contributorPaths: [], aOid: 'a', bOid: 'b', query: 'keep', boxedOids: ['a', 'b'] });
   });
 });
+
+describe('提交分类筛选状态', () => {
+  it('支持多个分类且不改变 A/B 和当前提交', () => {
+    useHistoryStore.setState({ selectedOid: 'selected', aOid: 'a', bOid: 'b', boxedOids: ['a', 'b'], classificationFilters: [] });
+    useHistoryStore.getState().toggleClassification('fix');
+    useHistoryStore.getState().toggleClassification('docs');
+    expect(useHistoryStore.getState()).toMatchObject({ classificationFilters: ['docs', 'fix'], selectedOid: 'selected', aOid: 'a', bOid: 'b' });
+    useHistoryStore.getState().setCommits([]);
+    expect(useHistoryStore.getState()).toMatchObject({ selectedOid: 'selected', aOid: 'a', bOid: 'b', boxedOids: ['a', 'b'] });
+    useHistoryStore.getState().toggleClassification('fix');
+    expect(useHistoryStore.getState()).toMatchObject({ classificationFilters: ['docs'], selectedOid: 'selected', aOid: 'a', bOid: 'b' });
+  });
+});

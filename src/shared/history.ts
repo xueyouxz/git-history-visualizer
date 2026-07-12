@@ -1,6 +1,9 @@
 export const REPOSITORY_INDEX_VERSION = 2 as const;
 export const CONTRIBUTOR_ANALYSIS_VERSION = 1 as const;
 export const OTHER_CONTRIBUTOR_ID = 'other' as const;
+export const COMMIT_CLASSIFICATION_VERSION = 1 as const;
+export const COMMIT_TYPES = ['feature', 'fix', 'refactor', 'test', 'docs', 'build/config', 'merge', 'mixed'] as const;
+export type CommitType = typeof COMMIT_TYPES[number];
 export const CHANGE_SIZE_LIMITS = { small: 10, medium: 100 } as const;
 export type ChangeSizeFilter = '' | 'small' | 'medium' | 'large';
 
@@ -36,6 +39,13 @@ export type ContributorEvolution = {
   windowSize: number;
   contributors: ContributorIdentity[];
   points: ContributorPoint[];
+};
+
+export type CommitClassification = { oid: string; type: CommitType; reasons: string[]; confidence: number };
+export type RepositoryClassifications = {
+  version: typeof COMMIT_CLASSIFICATION_VERSION;
+  revisionFingerprint: string;
+  results: CommitClassification[];
 };
 
 export type RepositoryIndex = {

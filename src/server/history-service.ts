@@ -4,6 +4,8 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import {
   REPOSITORY_INDEX_VERSION,
+  COMMIT_CLASSIFICATION_VERSION,
+  COMMIT_TYPES,
   CHANGE_SIZE_LIMITS,
   DIFF_LIMITS,
   type DiffFile,
@@ -14,8 +16,10 @@ import {
   type RepositoryTopology,
   type RepositoryComparison,
   type RepositoryTree,
+  type RepositoryClassifications,
 } from '../shared/history.js';
 import { analyzeContributors } from './contributor-analysis.js';
+import { classifyCommit } from './commit-classification.js';
 
 const gitEnvironment = {
   GIT_OPTIONAL_LOCKS: '0',
@@ -249,6 +253,12 @@ export class HistoryService {
           ? changes > CHANGE_SIZE_LIMITS.small && changes <= CHANGE_SIZE_LIMITS.medium
           : changeSize === 'large' ? changes > CHANGE_SIZE_LIMITS.medium : false;
     });
+    const requestedTypes = [...new Set(parameters.getAll('classification').flatMap(value => value.split(',')).filter(Boolean))];
+    if (requestedTypes.length) {
+      if (requestedTypes.some(type => !COMMIT_TYPES.includes(type as typeof COMMIT_TYPES[number]))) throw new Error('提交分类筛选无效');
+      const classifications = await this.classifications(id, signal); const typeByOid = new Map(classifications.results.map(result => [result.oid, result.type]));
+      commits = commits.filter(commit => requestedTypes.includes(typeByOid.get(commit.oid) ?? ''));
+    }
     return commits;
   }
 
@@ -311,6 +321,18 @@ export class HistoryService {
     const index = await this.index(id, signal);
     const commits = await this.search(id, parameters, signal);
     return analyzeContributors(commits, index.revisionFingerprint, windowSize, 6);
+  }
+
+  async classifications(id: string, signal?: AbortSignal): Promise<RepositoryClassifications> {
+    const index = await this.index(id, signal);
+    const cacheDirectory = path.join(path.resolve(this.managedRoot()), '.ghv-cache', id, index.revisionFingerprint);
+    const cacheFile = path.join(cacheDirectory, `classifications-v${COMMIT_CLASSIFICATION_VERSION}.json`);
+    const cached = await fs.readFile(cacheFile, 'utf8').then(value => JSON.parse(value) as RepositoryClassifications).catch(() => undefined);
+    if (cached?.version === COMMIT_CLASSIFICATION_VERSION && cached.revisionFingerprint === index.revisionFingerprint && cached.results.length === index.commits.length) return cached;
+    const classifications: RepositoryClassifications = { version: COMMIT_CLASSIFICATION_VERSION, revisionFingerprint: index.revisionFingerprint, results: index.commits.map(classifyCommit) };
+    await fs.mkdir(cacheDirectory, { recursive: true });
+    const temporary = `${cacheFile}.${randomUUID()}.tmp`; await fs.writeFile(temporary, JSON.stringify(classifications)); await fs.rename(temporary, cacheFile);
+    return classifications;
   }
 
   async compare(id: string, options: { a: string; b: string; parentIndex?: number; ignoreWhitespace?: boolean; contextLines?: number; requestedPath?: string; allowReplacement?: boolean }, signal?: AbortSignal): Promise<RepositoryComparison> {

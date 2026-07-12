@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { CONTRIBUTOR_ANALYSIS_VERSION, type ContributorEvolution } from '../shared/history';
 import type { Api } from './api';
 import { useHistoryStore } from './history-store';
+import { historyFilterParameters } from './history-filters';
 
 type Band = { authorId: string; name: string; path: string; aggregate: boolean };
 
@@ -27,8 +28,7 @@ export function ContributorFlow({ api }: { api: Api }) {
   useEffect(() => {
     if (!store.repositoryId) return;
     const controller = new AbortController(); setError('');
-    const parameters = new URLSearchParams({ version: String(CONTRIBUTOR_ANALYSIS_VERSION), window: '12' });
-    if (store.query) parameters.set('query', store.query); if (store.author) parameters.set('author', store.author); if (store.refFilter) parameters.set('ref', store.refFilter); if (store.changeSize) parameters.set('changeSize', store.changeSize);
+    const parameters = historyFilterParameters(store); parameters.set('version', String(CONTRIBUTOR_ANALYSIS_VERSION)); parameters.set('window', '12');
     api<ContributorEvolution>(`/api/repositories/${encodeURIComponent(store.repositoryId)}/contributors?${parameters}`, { signal: controller.signal })
       .then(result => {
         setEvolution(result);
@@ -39,7 +39,7 @@ export function ContributorFlow({ api }: { api: Api }) {
         }
       }).catch(cause => { if (cause.name !== 'AbortError') setError(cause.message); });
     return () => controller.abort();
-  }, [store.repositoryId, store.query, store.author, store.refFilter, store.changeSize]);
+  }, [store.repositoryId, store.query, store.author, store.refFilter, store.changeSize, store.classificationFilters]);
   const bands = useMemo(() => evolution ? buildBands(evolution) : [], [evolution]);
   const majorIds = evolution?.contributors.filter(contributor => !contributor.aggregate).map(contributor => contributor.authorId) ?? [];
   const choose = (authorId: string) => store.selectContributor(authorId, majorIds);

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { OTHER_CONTRIBUTOR_ID, type ChangeSizeFilter, type IndexedCommit, type RepositoryRef, type RepositorySummary, type RepositoryTopology } from '../shared/history';
+import { OTHER_CONTRIBUTOR_ID, type ChangeSizeFilter, type CommitClassification, type CommitType, type IndexedCommit, type RepositoryRef, type RepositorySummary, type RepositoryTopology } from '../shared/history';
 export type SemanticZoom = 'global' | 'intermediate' | 'detail';
 export type HistoryUrlState = { repositoryId: string; aOid: string; bOid: string; selectedOid: string };
 
@@ -21,6 +21,8 @@ type HistoryState = {
   contributorMajorIds: string[];
   contributorHighlightOids: string[];
   contributorPaths: string[];
+  classifications: Record<string, CommitClassification>;
+  classificationFilters: CommitType[];
   mainlineRef: string;
   query: string;
   author: string;
@@ -42,6 +44,8 @@ type HistoryState = {
   hover: (oid: string) => void;
   highlightPath: (path: string) => void;
   selectContributor: (authorId: string, majorIds: string[]) => void;
+  setClassifications: (classifications: CommitClassification[]) => void;
+  toggleClassification: (type: CommitType) => void;
   setMainlineRef: (mainlineRef: string) => void;
   setQuery: (query: string) => void;
   setAuthor: (author: string) => void;
@@ -76,6 +80,8 @@ export const useHistoryStore = create<HistoryState>(set => ({
   contributorMajorIds: [],
   contributorHighlightOids: [],
   contributorPaths: [],
+  classifications: {},
+  classificationFilters: [],
   mainlineRef: '',
   query: '',
   author: '',
@@ -84,7 +90,7 @@ export const useHistoryStore = create<HistoryState>(set => ({
   semanticZoom: 'intermediate',
   boxedOids: [],
   setRepositories: repositories => set({ repositories }),
-  openRepository: repositoryId => set({ repositoryId, selectedOid: '', aOid: '', bOid: '', hoveredOid: '', highlightedPath: '', highlightedOids: [], selectedContributorId: '', contributorMajorIds: [], contributorHighlightOids: [], contributorPaths: [], boxedOids: [], query: '', author: '', refFilter: '', changeSize: '' }),
+  openRepository: repositoryId => set({ repositoryId, selectedOid: '', aOid: '', bOid: '', hoveredOid: '', highlightedPath: '', highlightedOids: [], selectedContributorId: '', contributorMajorIds: [], contributorHighlightOids: [], contributorPaths: [], classifications: {}, classificationFilters: [], boxedOids: [], query: '', author: '', refFilter: '', changeSize: '' }),
   setHistory: (commits, refs, topology) => set(state => {
     const available = new Set(commits.map(commit => commit.oid));
     return {
@@ -96,11 +102,8 @@ export const useHistoryStore = create<HistoryState>(set => ({
     };
   }),
   setCommits: commits => set(state => {
-    const visible = new Set(commits.map(commit => commit.oid));
     return {
       commits,
-      selectedOid: visible.has(state.selectedOid) ? state.selectedOid : commits[0]?.oid ?? '',
-      boxedOids: state.boxedOids.filter(oid => visible.has(oid)),
       ...contributorHighlight(commits, state.selectedContributorId, state.contributorMajorIds),
     };
   }),
@@ -123,6 +126,8 @@ export const useHistoryStore = create<HistoryState>(set => ({
       ...contributorHighlight(state.commits, selectedContributorId, contributorMajorIds),
     };
   }),
+  setClassifications: results => set({ classifications: Object.fromEntries(results.map(result => [result.oid, result])) }),
+  toggleClassification: type => set(state => ({ classificationFilters: state.classificationFilters.includes(type) ? state.classificationFilters.filter(current => current !== type) : [...state.classificationFilters, type].sort((left, right) => left.localeCompare(right, 'en')) })),
   setMainlineRef: mainlineRef => set({ mainlineRef }),
   setQuery: query => set({ query }),
   setAuthor: author => set({ author }),

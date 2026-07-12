@@ -192,3 +192,39 @@ test('贡献者流带选择联动 DAG 与代码地图，清除后保留 A/B', as
   await expect(page.locator('.marker-a')).toHaveCount(1);
   await expect(page.locator('.marker-b')).toHaveCount(1);
 });
+
+test('提交分类显示依据和置信度，支持多类型筛选且保留 A/B', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Git 历史可视化' })).toBeVisible({ timeout: 15_000 });
+  await page.getByRole('button', { name: /merge feature，Merge Bot/ }).click();
+  await page.getByRole('button', { name: '设当前为 A' }).click();
+  await expect(page.locator('.commit-classification')).toContainText('merge');
+  await expect(page.locator('.commit-classification')).toContainText('100%');
+  await expect(page.locator('.commit-classification')).toContainText('多个父提交');
+  await expect(page.locator('.commit-node.classification-merge')).toHaveCount(1);
+  await page.getByRole('button', { name: /add unicode guide，Bob/ }).click();
+  await page.getByRole('button', { name: '设当前为 B' }).click();
+
+  await page.getByRole('checkbox', { name: 'merge' }).check();
+  await expect(page.locator('.commit-node')).toHaveCount(1);
+  await expect(page.getByRole('heading', { name: 'add unicode guide' })).toBeVisible();
+  await expect(page.locator('.marker-a')).toHaveCount(1);
+  await expect(page.locator('.marker-b')).toHaveCount(0);
+  await page.getByRole('checkbox', { name: 'docs' }).check();
+  await expect(page.getByRole('checkbox', { name: 'merge' })).toBeChecked();
+  await expect(page.getByRole('checkbox', { name: 'docs' })).toBeChecked();
+  await expect.poll(() => page.locator('.commit-node').evaluateAll(nodes => nodes.every(node => node.classList.contains('classification-merge') || node.classList.contains('classification-docs')))).toBe(true);
+  await expect(page.locator('.marker-b')).toHaveCount(1);
+  await expect(page.locator('.classification-legend')).toContainText('build/config');
+  await page.getByRole('checkbox', { name: 'merge' }).uncheck();
+  await page.getByRole('checkbox', { name: 'docs' }).uncheck();
+  await expect(page.locator('.marker-b')).toHaveCount(1);
+  await expect(page.getByRole('heading', { name: 'add unicode guide' })).toBeVisible();
+});
+
+test('分类请求失败不清空原始 DAG', async ({ page }) => {
+  await page.route('**/classifications?*', route => route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: '模拟分类失败' }) }));
+  await page.goto('/');
+  await expect(page.locator('svg.dag')).toHaveAccessibleName(/4 个提交/, { timeout: 15_000 });
+  await expect(page.getByRole('alert')).toContainText('模拟分类失败');
+});

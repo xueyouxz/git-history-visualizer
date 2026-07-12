@@ -3,12 +3,13 @@ import { createRoot } from 'react-dom/client';
 import { curveBumpX, line, pointer, select, zoom, zoomIdentity, type ZoomBehavior, type ZoomTransform } from 'd3';
 import './style.css';
 import { isTerminalImportPhase, type ImportPreview, type TaskState } from '../shared/import';
-import { CHANGE_SIZE_LIMITS, type ChangeSizeFilter, type IndexedCommit, type RepositoryIndex, type RepositoryRef, type RepositorySummary, type RepositoryTopology } from '../shared/history';
+import { CHANGE_SIZE_LIMITS, COMMIT_CLASSIFICATION_VERSION, COMMIT_TYPES, type ChangeSizeFilter, type CommitType, type IndexedCommit, type RepositoryClassifications, type RepositoryIndex, type RepositoryRef, type RepositorySummary, type RepositoryTopology } from '../shared/history';
 import { useHistoryStore, type SemanticZoom } from './history-store';
 import { DiffInspector } from './diff-inspector';
 import { CodeMap } from './code-map-view';
 import { ContributorFlow } from './contributor-flow';
 import type { Api } from './api';
+import { historyFilterParameters } from './history-filters';
 
 type Session = { token: string; managedRoot: string };
 type Directory = { name: string; path: string; isGitRepository: boolean };
@@ -78,7 +79,7 @@ function ImportPanel({ session, api, onImported, onRootChanged }: { session: Ses
 const zoomScale: Record<SemanticZoom, number> = { global: .62, intermediate: 1, detail: 1.5 };
 
 function HistoryGraph() {
-  const { commits, refs, topology, selectedOid, hoveredOid, highlightedOids, contributorHighlightOids, aOid, bOid, semanticZoom, boxedOids, select: selectCommit, hover, setSemanticZoom, setBoxedOids } = useHistoryStore();
+  const { commits, refs, topology, classifications, selectedOid, hoveredOid, highlightedOids, contributorHighlightOids, aOid, bOid, semanticZoom, boxedOids, select: selectCommit, hover, setSemanticZoom, setBoxedOids } = useHistoryStore();
   const svgRef = useRef<SVGSVGElement>(null);
   const zoomRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | undefined>(undefined);
   const [transform, setTransform] = useState<ZoomTransform>(zoomIdentity);
@@ -132,7 +133,7 @@ function HistoryGraph() {
       <title id="dag-title">横向提交拓扑图</title><desc id="dag-description">{nodes.length} 个提交，主线 {topology?.mainlineRef ?? '未选择'}，已选 {commitMap.get(selectedOid)?.subject ?? '无'}</desc>
       <g transform={transform.toString()}>
         {(topology?.edges ?? []).filter(edge => commitMap.has(edge.from) && commitMap.has(edge.to)).map(edge => { const from = positions.get(edge.from); const to = positions.get(edge.to); return from && to ? <path key={`${edge.from}-${edge.to}`} className={`edge ${relations.has(edge.from) && relations.has(edge.to) ? 'related' : ''}`} d={edgePath([[from.x, from.y], [to.x, to.y]]) ?? ''} /> : null; })}
-        {nodes.map(node => { const commit = commitMap.get(node.oid); const position = positions.get(node.oid)!; const labels = refsByOid.get(node.oid) ?? []; const active = node.oid === selectedOid; const related = relations.has(node.oid); const pathRelated = highlightedOids.includes(node.oid); const contributorRelated = contributorHighlightOids.includes(node.oid); const isA = node.oid === aOid; const isB = node.oid === bOid; const visibleLabel = semanticZoom !== 'global' || active || node.oid === hoveredOid; return <g key={node.oid} className={`commit-node ${active ? 'selected' : ''} ${related ? 'related' : ''} ${pathRelated ? 'path-related' : ''} ${contributorRelated ? 'contributor-related' : ''} ${isA || isB ? 'compared' : ''}`} transform={`translate(${position.x} ${position.y})`} onMouseEnter={() => hover(node.oid)} onMouseLeave={() => hover('')}>
+        {nodes.map(node => { const commit = commitMap.get(node.oid); const position = positions.get(node.oid)!; const labels = refsByOid.get(node.oid) ?? []; const active = node.oid === selectedOid; const related = relations.has(node.oid); const pathRelated = highlightedOids.includes(node.oid); const contributorRelated = contributorHighlightOids.includes(node.oid); const classification = classifications[node.oid]?.type.replace('/', '-'); const isA = node.oid === aOid; const isB = node.oid === bOid; const visibleLabel = semanticZoom !== 'global' || active || node.oid === hoveredOid; return <g key={node.oid} className={`commit-node ${classification ? `classification-${classification}` : ''} ${active ? 'selected' : ''} ${related ? 'related' : ''} ${pathRelated ? 'path-related' : ''} ${contributorRelated ? 'contributor-related' : ''} ${isA || isB ? 'compared' : ''}`} transform={`translate(${position.x} ${position.y})`} onMouseEnter={() => hover(node.oid)} onMouseLeave={() => hover('')}>
           <circle r={active ? 11 : 8} className={node.isMainline ? 'mainline' : 'branch'} />{isA && <g className="ab-marker marker-a" transform="translate(-20 -20)"><rect x="-8" y="-8" width="16" height="16" /><text y="4">A</text></g>}{isB && <g className="ab-marker marker-b" transform="translate(20 -20)"><path d="M 0 -10 L 10 0 L 0 10 L -10 0 Z" /><text y="4">B</text></g>}<foreignObject x={-15} y={-15} width={30} height={30}><button className="node-hit" aria-label={`${commit?.subject}，${commit?.author}，${node.oid}${isA ? '，版本 A' : ''}${isB ? '，版本 B' : ''}`} onClick={() => selectCommit(node.oid)} /></foreignObject><text className="oid" y={-15}>{node.oid.slice(0, 8)}</text>{visibleLabel && <text className="subject" y={26}>{commit?.subject.slice(0, semanticZoom === 'detail' ? 42 : 24)}</text>}{semanticZoom === 'detail' && <text className="meta" y={43}>{commit?.author} · +{commit?.additions}/-{commit?.deletions}</text>}{labels.map((ref, index) => <text key={ref.name} className={`ref-label ${ref.kind}`} y={-31 - index * 15}>{ref.shortName}</text>)}</g>; })}
       </g>
       {boxStart && boxEnd && <rect className="selection-box" x={Math.min(boxStart[0], boxEnd[0])} y={Math.min(boxStart[1], boxEnd[1])} width={Math.abs(boxEnd[0] - boxStart[0])} height={Math.abs(boxEnd[1] - boxStart[1])} />}
@@ -147,7 +148,8 @@ function Workspace({ api }: { api: Api }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [dockMode, setDockMode] = useState<'diff' | 'map' | 'contributors' | 'combined'>('diff');
-  const selected = store.commits.find(commit => commit.oid === store.selectedOid);
+  const selected = store.allCommits.find(commit => commit.oid === store.selectedOid);
+  const selectedClassification = selected ? store.classifications[selected.oid] : undefined;
   const hovered = store.commits.find(commit => commit.oid === store.hoveredOid);
   const authors = [...new Set(store.allCommits.map(commit => commit.author))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
   useEffect(() => {
@@ -157,17 +159,19 @@ function Workspace({ api }: { api: Api }) {
       api<RepositoryIndex>(`/api/repositories/${encodeURIComponent(store.repositoryId)}`, { signal: controller.signal }),
       api<RepositoryTopology>(`/api/repositories/${encodeURIComponent(store.repositoryId)}/topology`, { signal: controller.signal }),
     ]).then(([index, topology]) => store.setHistory(index.commits, index.refs, topology)).catch(cause => { if (cause.name !== 'AbortError') setError(cause.message); }).finally(() => setLoading(false));
+    api<RepositoryClassifications>(`/api/repositories/${encodeURIComponent(store.repositoryId)}/classifications?version=${COMMIT_CLASSIFICATION_VERSION}`, { signal: controller.signal })
+      .then(classifications => store.setClassifications(classifications.results)).catch(cause => { if (cause.name !== 'AbortError') setError(cause.message); });
     return () => controller.abort();
   }, [store.repositoryId]);
   useEffect(() => {
     if (!store.repositoryId) return;
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      const parameters = new URLSearchParams(); if (store.query) parameters.set('query', store.query); if (store.author) parameters.set('author', store.author); if (store.refFilter) parameters.set('ref', store.refFilter); if (store.changeSize) parameters.set('changeSize', store.changeSize);
+      const parameters = historyFilterParameters(store);
       api<IndexedCommit[]>(`/api/repositories/${encodeURIComponent(store.repositoryId)}/commits?${parameters}`, { signal: controller.signal }).then(store.setCommits).catch(cause => { if (cause.name !== 'AbortError') setError(cause.message); });
     }, 180);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [store.repositoryId, store.query, store.author, store.refFilter, store.changeSize]);
+  }, [store.repositoryId, store.query, store.author, store.refFilter, store.changeSize, store.classificationFilters]);
   useEffect(() => {
     if (!store.repositoryId) return;
     const parameters = new URLSearchParams(); parameters.set('repository', store.repositoryId);
@@ -179,9 +183,9 @@ function Workspace({ api }: { api: Api }) {
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   };
   return <div className="workspace">
-    <aside className="sidebar"><label>仓库<select value={store.repositoryId} onChange={event => store.openRepository(event.target.value)}>{store.repositories.map(repository => <option key={repository.id} value={repository.id}>{repository.name} ({repository.commitCount})</option>)}</select></label><label>主线<select value={store.mainlineRef} onChange={event => void switchMainline(event.target.value)}>{store.refs.map(ref => <option key={ref.name} value={ref.name}>{ref.shortName}</option>)}</select></label><label>搜索<input type="search" value={store.query} onChange={event => store.setQuery(event.target.value)} placeholder="消息、OID、作者或路径" /></label><label>作者<select value={store.author} onChange={event => store.setAuthor(event.target.value)}><option value="">全部作者</option>{authors.map(author => <option key={author}>{author}</option>)}</select></label><label>引用<select value={store.refFilter} onChange={event => store.setRefFilter(event.target.value)}><option value="">全部引用</option>{store.refs.map(ref => <option key={ref.name} value={ref.name}>{ref.shortName}</option>)}</select></label><label>变更规模<select value={store.changeSize} onChange={event => store.setChangeSize(event.target.value as ChangeSizeFilter)}><option value="">全部规模</option><option value="small">小，最多 {CHANGE_SIZE_LIMITS.small} 行</option><option value="medium">中，{CHANGE_SIZE_LIMITS.small + 1}–{CHANGE_SIZE_LIMITS.medium} 行</option><option value="large">大，超过 {CHANGE_SIZE_LIMITS.medium} 行</option></select></label><p className="muted">当前范围：全部可达提交</p></aside>
+    <aside className="sidebar"><label>仓库<select value={store.repositoryId} onChange={event => store.openRepository(event.target.value)}>{store.repositories.map(repository => <option key={repository.id} value={repository.id}>{repository.name} ({repository.commitCount})</option>)}</select></label><label>主线<select value={store.mainlineRef} onChange={event => void switchMainline(event.target.value)}>{store.refs.map(ref => <option key={ref.name} value={ref.name}>{ref.shortName}</option>)}</select></label><label>搜索<input type="search" value={store.query} onChange={event => store.setQuery(event.target.value)} placeholder="消息、OID、作者或路径" /></label><label>作者<select value={store.author} onChange={event => store.setAuthor(event.target.value)}><option value="">全部作者</option>{authors.map(author => <option key={author}>{author}</option>)}</select></label><label>引用<select value={store.refFilter} onChange={event => store.setRefFilter(event.target.value)}><option value="">全部引用</option>{store.refs.map(ref => <option key={ref.name} value={ref.name}>{ref.shortName}</option>)}</select></label><label>变更规模<select value={store.changeSize} onChange={event => store.setChangeSize(event.target.value as ChangeSizeFilter)}><option value="">全部规模</option><option value="small">小，最多 {CHANGE_SIZE_LIMITS.small} 行</option><option value="medium">中，{CHANGE_SIZE_LIMITS.small + 1}–{CHANGE_SIZE_LIMITS.medium} 行</option><option value="large">大，超过 {CHANGE_SIZE_LIMITS.medium} 行</option></select></label><fieldset className="classification-legend"><legend>提交类型</legend>{COMMIT_TYPES.map(type => <label key={type} className={`classification-option classification-${type.replace('/', '-')}`}><input type="checkbox" checked={store.classificationFilters.includes(type)} onChange={() => store.toggleClassification(type as CommitType)} />{type}</label>)}</fieldset><p className="muted">当前范围：全部可达提交</p></aside>
     <HistoryGraph />
-    <aside className="inspector"><p className="eyebrow">提交检查器</p>{loading ? <p>正在索引…</p> : selected ? <><h2>{selected.subject}</h2><code className="full-oid">{selected.oid}</code><dl><div><dt>作者</dt><dd>{selected.author}</dd></div><div><dt>父提交</dt><dd>{selected.parents.length || '无'} 个</dd></div><div><dt>变更</dt><dd>{selected.filesChanged} 文件，+{selected.additions}/-{selected.deletions}</dd></div></dl><p>{selected.message}</p><h3>相关路径</h3><ul className="paths">{(hovered ?? selected).paths.map(path => <li key={path}><code>{path}</code></li>)}</ul></> : <p>当前筛选没有提交。</p>}{error && <p className="error" role="alert">{error}</p>}</aside>
+    <aside className="inspector"><p className="eyebrow">提交检查器</p>{loading ? <p>正在索引…</p> : selected ? <><h2>{selected.subject}</h2><code className="full-oid">{selected.oid}</code><dl><div><dt>作者</dt><dd>{selected.author}</dd></div><div><dt>父提交</dt><dd>{selected.parents.length || '无'} 个</dd></div><div><dt>变更</dt><dd>{selected.filesChanged} 文件，+{selected.additions}/-{selected.deletions}</dd></div></dl>{selectedClassification && <section className="commit-classification" aria-label="提交分类"><h3>分类：{selectedClassification.type}</h3><p>置信度 {Math.round(selectedClassification.confidence * 100)}%</p><ul>{selectedClassification.reasons.map(reason => <li key={reason}>{reason}</li>)}</ul></section>}<p>{selected.message}</p><h3>相关路径</h3><ul className="paths">{(hovered ?? selected).paths.map(path => <li key={path}><code>{path}</code></li>)}</ul></> : <p>当前筛选没有提交。</p>}{error && <p className="error" role="alert">{error}</p>}</aside>
     <section className="analysis-dock" aria-label="分析坞">
       <div className="dock-tabs" role="tablist" aria-label="分析视图">
         <button role="tab" aria-selected={dockMode === 'diff'} onClick={() => setDockMode('diff')}>差异</button>

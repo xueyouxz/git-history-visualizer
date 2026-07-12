@@ -39,6 +39,14 @@ progress { width: 100%; accent-color: #245f89; }
 .inspector dd { margin: 0; }
 .full-oid { display: block; font-size: 11px; overflow-wrap: anywhere; color: #59666d; }
 .paths { display: grid; gap: 6px; font-size: 12px; overflow-wrap: anywhere; }
+.classification-legend { display: grid; grid-template-columns: 1fr 1fr; gap: 5px 8px; margin: 0; padding: 8px; border: 1px solid #d3d7d9; }
+.classification-legend legend { font-size: 13px; font-weight: 700; }
+.classification-option { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 10px; font-weight: 500; overflow-wrap: anywhere; }
+.classification-option::before { width: 9px; height: 9px; border: 1px solid #17202a; content: ""; flex: none; }
+.classification-option input { width: auto; min-height: auto; margin: 0; }
+.commit-classification { margin: 12px 0; padding: 8px 10px; border-left: 4px solid #245f89; background: #eef3f5; font-size: 12px; }
+.commit-classification h3, .commit-classification p { margin: 2px 0 6px; }
+.commit-classification ul { margin: 0; padding-left: 18px; }
 .graph-panel { min-width: 0; display: grid; grid-template-rows: 49px minmax(0, 1fr) auto auto; background: #fffdf8; overflow: hidden; }
 .graph-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; border-bottom: 1px solid #d3d7d9; }
 .zoom-levels button { padding: 5px 10px; font-size: 12px; }
@@ -52,9 +60,17 @@ progress { width: 100%; accent-color: #245f89; }
 .commit-node .mainline { fill: #fffdf8; stroke: #245f89; }
 .commit-node .branch { fill: #fffdf8; stroke: #8b5a2b; }
 .commit-node.related circle { fill: #dbe9f1; }
-.commit-node.path-related circle { fill: #f0c86c; stroke-width: 4; }
-.commit-node.contributor-related circle { fill: #9dc7b8; stroke: #166b58; stroke-width: 4; }
-.commit-node.selected circle { fill: #245f89; stroke: #17202a; }
+.commit-node.path-related circle { stroke: #b06b00; stroke-width: 4; }
+.commit-node.contributor-related circle { stroke: #166b58; stroke-width: 4; }
+.commit-node.selected circle { stroke: #17202a; stroke-width: 5; }
+.commit-node.classification-feature circle, .classification-option.classification-feature::before { fill: #377eb8; background: #377eb8; }
+.commit-node.classification-fix circle, .classification-option.classification-fix::before { fill: #d55e00; background: #d55e00; }
+.commit-node.classification-refactor circle, .classification-option.classification-refactor::before { fill: #009e73; background: #009e73; }
+.commit-node.classification-test circle, .classification-option.classification-test::before { fill: #cc79a7; background: #cc79a7; }
+.commit-node.classification-docs circle, .classification-option.classification-docs::before { fill: #e69f00; background: #e69f00; }
+.commit-node.classification-build-config circle, .classification-option.classification-build-config::before { fill: #56b4e9; background: #56b4e9; }
+.commit-node.classification-merge circle, .classification-option.classification-merge::before { fill: #7b6ba8; background: #7b6ba8; }
+.commit-node.classification-mixed circle, .classification-option.classification-mixed::before { fill: #999; background: repeating-linear-gradient(45deg, #666 0 2px, #fff 2px 4px); }
 .ab-marker { pointer-events: none; }
 .ab-marker rect, .ab-marker path { fill: #fffdf8; stroke: #17202a; stroke-width: 2.5; vector-effect: non-scaling-stroke; }
 .ab-marker text { font-size: 10px; font-weight: 800; text-anchor: middle; fill: #17202a; }
