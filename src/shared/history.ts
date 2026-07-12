@@ -1,4 +1,6 @@
-export const REPOSITORY_INDEX_VERSION = 1 as const;
+export const REPOSITORY_INDEX_VERSION = 2 as const;
+export const CONTRIBUTOR_ANALYSIS_VERSION = 1 as const;
+export const OTHER_CONTRIBUTOR_ID = 'other' as const;
 export const CHANGE_SIZE_LIMITS = { small: 10, medium: 100 } as const;
 export type ChangeSizeFilter = '' | 'small' | 'medium' | 'large';
 
@@ -15,6 +17,7 @@ export type IndexedCommit = {
   oid: string;
   parents: string[];
   author: string;
+  authorId: string;
   authoredAt: string;
   subject: string;
   message: string;
@@ -22,6 +25,17 @@ export type IndexedCommit = {
   deletions: number;
   filesChanged: number;
   paths: string[];
+};
+
+export type ContributorIdentity = { authorId: string; name: string; aggregate: boolean };
+export type ContributorShare = { authorId: string; lines: number; share: number };
+export type ContributorPoint = { oid: string; order: number; shares: ContributorShare[] };
+export type ContributorEvolution = {
+  version: typeof CONTRIBUTOR_ANALYSIS_VERSION;
+  revisionFingerprint: string;
+  windowSize: number;
+  contributors: ContributorIdentity[];
+  points: ContributorPoint[];
 };
 
 export type RepositoryIndex = {

@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { ChangeSizeFilter, IndexedCommit, RepositoryRef, RepositorySummary, RepositoryTopology } from '../shared/history';
+import { OTHER_CONTRIBUTOR_ID, type ChangeSizeFilter, type IndexedCommit, type RepositoryRef, type RepositorySummary, type RepositoryTopology } from '../shared/history';
 export type SemanticZoom = 'global' | 'intermediate' | 'detail';
 export type HistoryUrlState = { repositoryId: string; aOid: string; bOid: string; selectedOid: string };
 
@@ -17,6 +17,10 @@ type HistoryState = {
   hoveredOid: string;
   highlightedPath: string;
   highlightedOids: string[];
+  selectedContributorId: string;
+  contributorMajorIds: string[];
+  contributorHighlightOids: string[];
+  contributorPaths: string[];
   mainlineRef: string;
   query: string;
   author: string;
@@ -37,6 +41,7 @@ type HistoryState = {
   restoreUrlState: (urlState: HistoryUrlState) => void;
   hover: (oid: string) => void;
   highlightPath: (path: string) => void;
+  selectContributor: (authorId: string, majorIds: string[]) => void;
   setMainlineRef: (mainlineRef: string) => void;
   setQuery: (query: string) => void;
   setAuthor: (author: string) => void;
@@ -44,6 +49,14 @@ type HistoryState = {
   setChangeSize: (changeSize: ChangeSizeFilter) => void;
   setSemanticZoom: (semanticZoom: SemanticZoom) => void;
   setBoxedOids: (boxedOids: string[]) => void;
+};
+
+const contributorHighlight = (commits: IndexedCommit[], selectedContributorId: string, contributorMajorIds: string[]) => {
+  const selected = selectedContributorId ? commits.filter(commit => selectedContributorId === OTHER_CONTRIBUTOR_ID ? !contributorMajorIds.includes(commit.authorId) : commit.authorId === selectedContributorId) : [];
+  return {
+    contributorHighlightOids: selected.map(commit => commit.oid),
+    contributorPaths: [...new Set(selected.flatMap(commit => commit.paths))].sort((left, right) => left.localeCompare(right, 'en')),
+  };
 };
 
 export const useHistoryStore = create<HistoryState>(set => ({
@@ -59,6 +72,10 @@ export const useHistoryStore = create<HistoryState>(set => ({
   hoveredOid: '',
   highlightedPath: '',
   highlightedOids: [],
+  selectedContributorId: '',
+  contributorMajorIds: [],
+  contributorHighlightOids: [],
+  contributorPaths: [],
   mainlineRef: '',
   query: '',
   author: '',
@@ -67,7 +84,7 @@ export const useHistoryStore = create<HistoryState>(set => ({
   semanticZoom: 'intermediate',
   boxedOids: [],
   setRepositories: repositories => set({ repositories }),
-  openRepository: repositoryId => set({ repositoryId, selectedOid: '', aOid: '', bOid: '', hoveredOid: '', highlightedPath: '', highlightedOids: [], boxedOids: [], query: '', author: '', refFilter: '', changeSize: '' }),
+  openRepository: repositoryId => set({ repositoryId, selectedOid: '', aOid: '', bOid: '', hoveredOid: '', highlightedPath: '', highlightedOids: [], selectedContributorId: '', contributorMajorIds: [], contributorHighlightOids: [], contributorPaths: [], boxedOids: [], query: '', author: '', refFilter: '', changeSize: '' }),
   setHistory: (commits, refs, topology) => set(state => {
     const available = new Set(commits.map(commit => commit.oid));
     return {
@@ -75,6 +92,7 @@ export const useHistoryStore = create<HistoryState>(set => ({
       selectedOid: available.has(state.selectedOid) ? state.selectedOid : commits[0]?.oid ?? '',
       aOid: available.has(state.aOid) ? state.aOid : '',
       bOid: available.has(state.bOid) ? state.bOid : '',
+      ...contributorHighlight(commits, state.selectedContributorId, state.contributorMajorIds),
     };
   }),
   setCommits: commits => set(state => {
@@ -83,6 +101,7 @@ export const useHistoryStore = create<HistoryState>(set => ({
       commits,
       selectedOid: visible.has(state.selectedOid) ? state.selectedOid : commits[0]?.oid ?? '',
       boxedOids: state.boxedOids.filter(oid => visible.has(oid)),
+      ...contributorHighlight(commits, state.selectedContributorId, state.contributorMajorIds),
     };
   }),
   setTopology: topology => set({ topology, mainlineRef: topology.mainlineRef }),
@@ -97,6 +116,13 @@ export const useHistoryStore = create<HistoryState>(set => ({
     highlightedPath,
     highlightedOids: highlightedPath ? state.allCommits.filter(commit => commit.paths.some(path => path === highlightedPath || path.startsWith(`${highlightedPath}/`))).map(commit => commit.oid) : [],
   })),
+  selectContributor: (selectedContributorId, contributorMajorIds) => set(state => {
+    return {
+      selectedContributorId,
+      contributorMajorIds,
+      ...contributorHighlight(state.commits, selectedContributorId, contributorMajorIds),
+    };
+  }),
   setMainlineRef: mainlineRef => set({ mainlineRef }),
   setQuery: query => set({ query }),
   setAuthor: author => set({ author }),

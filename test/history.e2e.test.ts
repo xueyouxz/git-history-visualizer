@@ -9,9 +9,9 @@ import { createApp } from '../src/server/app.js';
 const exec = promisify(execFile);
 const cleanup: string[] = [];
 
-async function commit(repository: string, message: string, name: string) {
+async function commit(repository: string, message: string, name: string, email = `${name.toLowerCase()}@example.com`) {
   await exec('git', ['add', '.'], { cwd: repository });
-  await exec('git', ['-c', `user.name=${name}`, '-c', `user.email=${name.toLowerCase()}@example.com`, 'commit', '-m', message], { cwd: repository });
+  await exec('git', ['-c', `user.name=${name}`, '-c', `user.email=${email}`, 'commit', '-m', message], { cwd: repository });
   return (await exec('git', ['rev-parse', 'HEAD'], { cwd: repository })).stdout.trim();
 }
 
@@ -252,7 +252,7 @@ describe('提交历史 REST 接口', () => {
     const readIndex = () => fetch(`${base}/api/repositories/fixture`, { headers }).then(response => response.json());
     const first = await readIndex();
     expect(first.revisionFingerprint).toMatch(/^[0-9a-f]{64}$/);
-    await access(path.join(fixture.managedRoot, '.ghv-cache', 'fixture', first.revisionFingerprint, 'index-v1.json'));
+    await access(path.join(fixture.managedRoot, '.ghv-cache', 'fixture', first.revisionFingerprint, 'index-v2.json'));
 
     await exec('git', ['update-ref', 'refs/tags/cache-test', fixture.oids.feature], { cwd: fixture.repository });
     const changed = await readIndex();
@@ -261,5 +261,43 @@ describe('提交历史 REST 接口', () => {
 
     await exec('git', ['update-ref', '-d', 'refs/tags/cache-test'], { cwd: fixture.repository });
     expect((await readIndex()).revisionFingerprint).toBe(first.revisionFingerprint);
+  }, 15_000);
+
+  it('按 mailmap 合并多个邮箱，隐藏邮箱并聚合其他贡献者', async () => {
+    const fixture = sharedFixture;
+    const repository = path.join(fixture.managedRoot, 'contributors');
+    await mkdir(repository, { recursive: true });
+    await exec('git', ['init', '-b', 'main'], { cwd: repository });
+    await writeFile(path.join(repository, '.mailmap'), 'Bob <bob@example.com> Robert <robert@work.example>\nBob <bob@example.com> Bobby <bobby@home.example>\n');
+    await commit(repository, 'initialize mailmap', 'Alice', 'alice@example.com');
+    const aliases = [['Robert', 'robert@work.example'], ['Bobby', 'bobby@home.example']];
+    for (const [index, [name, email]] of aliases.entries()) {
+      await writeFile(path.join(repository, `alias-${index}.txt`), `${name}\n`);
+      await commit(repository, `alias ${index}`, name, email);
+    }
+    for (let index = 1; index <= 7; index += 1) {
+      await writeFile(path.join(repository, `person-${index}.txt`), `${index}\n`);
+      await commit(repository, `person ${index}`, `Person ${index}`, `person${index}@example.com`);
+    }
+
+    const { base, headers } = sharedApp;
+    const index = await fetch(`${base}/api/repositories/contributors`, { headers }).then(response => response.json());
+    const bobCommits = index.commits.filter((entry: { author: string }) => entry.author === 'Bob');
+    expect(bobCommits).toHaveLength(2);
+    expect(new Set(bobCommits.map((entry: { authorId: string }) => entry.authorId)).size).toBe(1);
+    expect(bobCommits[0].authorId).toMatch(/^[0-9a-f]{64}$/);
+
+    const response = await fetch(`${base}/api/repositories/contributors/contributors?version=1&window=12`, { headers });
+    expect(response.status).toBe(200);
+    const evolution = await response.json();
+    expect(evolution).toMatchObject({ version: 1, windowSize: 12, revisionFingerprint: index.revisionFingerprint });
+    expect(evolution.points.map((point: { oid: string }) => point.oid)).toEqual(index.commits.map((commit: { oid: string }) => commit.oid));
+    expect(evolution.contributors).toHaveLength(7);
+    expect(evolution.contributors.at(-1)).toEqual({ authorId: 'other', name: '其他', aggregate: true });
+    expect(JSON.stringify(evolution)).not.toContain('@');
+    expect(JSON.stringify(index)).not.toContain('@');
+    const filtered = await fetch(`${base}/api/repositories/contributors/contributors?version=1&window=12&author=Bob`, { headers }).then(result => result.json());
+    expect(filtered.points).toHaveLength(2);
+    expect(filtered.contributors).toEqual([{ authorId: bobCommits[0].authorId, name: 'Bob', aggregate: false }]);
   }, 15_000);
 });

@@ -15,6 +15,7 @@ import {
   type RepositoryComparison,
   type RepositoryTree,
 } from '../shared/history.js';
+import { analyzeContributors } from './contributor-analysis.js';
 
 const gitEnvironment = {
   GIT_OPTIONAL_LOCKS: '0',
@@ -119,8 +120,10 @@ async function readRefs(repository: string, signal?: AbortSignal): Promise<Repos
 }
 
 async function readCommit(repository: string, oid: string, parents: string[], signal?: AbortSignal): Promise<IndexedCommit> {
-  const metadata = await runGit(repository, ['show', '-s', '--format=%aN%x00%aI%x00%s%x00%B', oid], signal);
-  const [author, authoredAt, subject, message = ''] = metadata.split('\0');
+  const metadata = await runGit(repository, ['show', '-s', '--format=%aN%x00%aE%x00%aI%x00%s%x00%B', oid], signal);
+  const [author, authorEmail, authoredAt, subject, message = ''] = metadata.split('\0');
+  const identity = `${author.normalize('NFKC').trim().toLocaleLowerCase('en-US')}\0${authorEmail.normalize('NFKC').trim().toLocaleLowerCase('en-US')}`;
+  const authorId = createHash('sha256').update(identity).digest('hex');
   const numstat = await runGit(repository, ['show', '--format=', '--numstat', '-z', '--no-renames', oid], signal);
   const changes = numstat.split('\0').filter(Boolean).map(entry => {
     const [added, deleted, ...pathParts] = entry.split('\t');
@@ -130,6 +133,7 @@ async function readCommit(repository: string, oid: string, parents: string[], si
     oid,
     parents,
     author,
+    authorId,
     authoredAt,
     subject,
     message: message.trim(),
@@ -301,6 +305,12 @@ export class HistoryService {
     }).filter(entry => entry.path !== normalizedPath)
       .sort((left, right) => left.path.localeCompare(right.path, 'en'));
     return { oid, path: normalizedPath, entries };
+  }
+
+  async contributors(id: string, parameters: URLSearchParams, windowSize = 12, signal?: AbortSignal) {
+    const index = await this.index(id, signal);
+    const commits = await this.search(id, parameters, signal);
+    return analyzeContributors(commits, index.revisionFingerprint, windowSize, 6);
   }
 
   async compare(id: string, options: { a: string; b: string; parentIndex?: number; ignoreWhitespace?: boolean; contextLines?: number; requestedPath?: string; allowReplacement?: boolean }, signal?: AbortSignal): Promise<RepositoryComparison> {

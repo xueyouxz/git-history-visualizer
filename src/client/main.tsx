@@ -7,6 +7,7 @@ import { CHANGE_SIZE_LIMITS, type ChangeSizeFilter, type IndexedCommit, type Rep
 import { useHistoryStore, type SemanticZoom } from './history-store';
 import { DiffInspector } from './diff-inspector';
 import { CodeMap } from './code-map-view';
+import { ContributorFlow } from './contributor-flow';
 import type { Api } from './api';
 
 type Session = { token: string; managedRoot: string };
@@ -77,7 +78,7 @@ function ImportPanel({ session, api, onImported, onRootChanged }: { session: Ses
 const zoomScale: Record<SemanticZoom, number> = { global: .62, intermediate: 1, detail: 1.5 };
 
 function HistoryGraph() {
-  const { commits, refs, topology, selectedOid, hoveredOid, highlightedOids, aOid, bOid, semanticZoom, boxedOids, select: selectCommit, hover, setSemanticZoom, setBoxedOids } = useHistoryStore();
+  const { commits, refs, topology, selectedOid, hoveredOid, highlightedOids, contributorHighlightOids, aOid, bOid, semanticZoom, boxedOids, select: selectCommit, hover, setSemanticZoom, setBoxedOids } = useHistoryStore();
   const svgRef = useRef<SVGSVGElement>(null);
   const zoomRef = useRef<ZoomBehavior<SVGSVGElement, unknown> | undefined>(undefined);
   const [transform, setTransform] = useState<ZoomTransform>(zoomIdentity);
@@ -131,7 +132,7 @@ function HistoryGraph() {
       <title id="dag-title">横向提交拓扑图</title><desc id="dag-description">{nodes.length} 个提交，主线 {topology?.mainlineRef ?? '未选择'}，已选 {commitMap.get(selectedOid)?.subject ?? '无'}</desc>
       <g transform={transform.toString()}>
         {(topology?.edges ?? []).filter(edge => commitMap.has(edge.from) && commitMap.has(edge.to)).map(edge => { const from = positions.get(edge.from); const to = positions.get(edge.to); return from && to ? <path key={`${edge.from}-${edge.to}`} className={`edge ${relations.has(edge.from) && relations.has(edge.to) ? 'related' : ''}`} d={edgePath([[from.x, from.y], [to.x, to.y]]) ?? ''} /> : null; })}
-        {nodes.map(node => { const commit = commitMap.get(node.oid); const position = positions.get(node.oid)!; const labels = refsByOid.get(node.oid) ?? []; const active = node.oid === selectedOid; const related = relations.has(node.oid); const pathRelated = highlightedOids.includes(node.oid); const isA = node.oid === aOid; const isB = node.oid === bOid; const visibleLabel = semanticZoom !== 'global' || active || node.oid === hoveredOid; return <g key={node.oid} className={`commit-node ${active ? 'selected' : ''} ${related ? 'related' : ''} ${pathRelated ? 'path-related' : ''} ${isA || isB ? 'compared' : ''}`} transform={`translate(${position.x} ${position.y})`} onMouseEnter={() => hover(node.oid)} onMouseLeave={() => hover('')}>
+        {nodes.map(node => { const commit = commitMap.get(node.oid); const position = positions.get(node.oid)!; const labels = refsByOid.get(node.oid) ?? []; const active = node.oid === selectedOid; const related = relations.has(node.oid); const pathRelated = highlightedOids.includes(node.oid); const contributorRelated = contributorHighlightOids.includes(node.oid); const isA = node.oid === aOid; const isB = node.oid === bOid; const visibleLabel = semanticZoom !== 'global' || active || node.oid === hoveredOid; return <g key={node.oid} className={`commit-node ${active ? 'selected' : ''} ${related ? 'related' : ''} ${pathRelated ? 'path-related' : ''} ${contributorRelated ? 'contributor-related' : ''} ${isA || isB ? 'compared' : ''}`} transform={`translate(${position.x} ${position.y})`} onMouseEnter={() => hover(node.oid)} onMouseLeave={() => hover('')}>
           <circle r={active ? 11 : 8} className={node.isMainline ? 'mainline' : 'branch'} />{isA && <g className="ab-marker marker-a" transform="translate(-20 -20)"><rect x="-8" y="-8" width="16" height="16" /><text y="4">A</text></g>}{isB && <g className="ab-marker marker-b" transform="translate(20 -20)"><path d="M 0 -10 L 10 0 L 0 10 L -10 0 Z" /><text y="4">B</text></g>}<foreignObject x={-15} y={-15} width={30} height={30}><button className="node-hit" aria-label={`${commit?.subject}，${commit?.author}，${node.oid}${isA ? '，版本 A' : ''}${isB ? '，版本 B' : ''}`} onClick={() => selectCommit(node.oid)} /></foreignObject><text className="oid" y={-15}>{node.oid.slice(0, 8)}</text>{visibleLabel && <text className="subject" y={26}>{commit?.subject.slice(0, semanticZoom === 'detail' ? 42 : 24)}</text>}{semanticZoom === 'detail' && <text className="meta" y={43}>{commit?.author} · +{commit?.additions}/-{commit?.deletions}</text>}{labels.map((ref, index) => <text key={ref.name} className={`ref-label ${ref.kind}`} y={-31 - index * 15}>{ref.shortName}</text>)}</g>; })}
       </g>
       {boxStart && boxEnd && <rect className="selection-box" x={Math.min(boxStart[0], boxEnd[0])} y={Math.min(boxStart[1], boxEnd[1])} width={Math.abs(boxEnd[0] - boxStart[0])} height={Math.abs(boxEnd[1] - boxStart[1])} />}
@@ -145,7 +146,7 @@ function Workspace({ api }: { api: Api }) {
   const store = useHistoryStore();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [dockMode, setDockMode] = useState<'diff' | 'map'>('diff');
+  const [dockMode, setDockMode] = useState<'diff' | 'map' | 'contributors' | 'combined'>('diff');
   const selected = store.commits.find(commit => commit.oid === store.selectedOid);
   const hovered = store.commits.find(commit => commit.oid === store.hoveredOid);
   const authors = [...new Set(store.allCommits.map(commit => commit.author))].sort((a, b) => a.localeCompare(b, 'zh-CN'));
@@ -185,8 +186,10 @@ function Workspace({ api }: { api: Api }) {
       <div className="dock-tabs" role="tablist" aria-label="分析视图">
         <button role="tab" aria-selected={dockMode === 'diff'} onClick={() => setDockMode('diff')}>差异</button>
         <button role="tab" aria-selected={dockMode === 'map'} onClick={() => setDockMode('map')}>代码地图</button>
+        <button role="tab" aria-selected={dockMode === 'contributors'} onClick={() => setDockMode('contributors')}>贡献者</button>
+        <button role="tab" aria-selected={dockMode === 'combined'} onClick={() => setDockMode('combined')}>并列分析</button>
       </div>
-      {dockMode === 'diff' ? <DiffInspector api={api} /> : <CodeMap api={api} />}
+      {dockMode === 'diff' ? <DiffInspector api={api} /> : dockMode === 'map' ? <CodeMap api={api} /> : dockMode === 'contributors' ? <ContributorFlow api={api} /> : <div className="analysis-side-by-side"><CodeMap api={api} /><ContributorFlow api={api} /></div>}
     </section>
   </div>;
 }

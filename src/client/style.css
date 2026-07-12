@@ -53,6 +53,7 @@ progress { width: 100%; accent-color: #245f89; }
 .commit-node .branch { fill: #fffdf8; stroke: #8b5a2b; }
 .commit-node.related circle { fill: #dbe9f1; }
 .commit-node.path-related circle { fill: #f0c86c; stroke-width: 4; }
+.commit-node.contributor-related circle { fill: #9dc7b8; stroke: #166b58; stroke-width: 4; }
 .commit-node.selected circle { fill: #245f89; stroke: #17202a; }
 .ab-marker { pointer-events: none; }
 .ab-marker rect, .ab-marker path { fill: #fffdf8; stroke: #17202a; stroke-width: 2.5; vector-effect: non-scaling-stroke; }
@@ -97,6 +98,20 @@ progress { width: 100%; accent-color: #245f89; }
 .map-file small { font-size: 10px; }
 .map-directory { position: absolute; z-index: 2; border: 2px solid #245f89; pointer-events: none; }
 .map-directory > button { height: 20px; padding: 1px 5px; border: 0; border-radius: 0; background: #245f89; color: #fff; font-size: 10px; pointer-events: auto; }
+.map-file.contributor-related { outline: 4px solid #166b58; outline-offset: -5px; }
+.analysis-side-by-side { display: grid; grid-template-columns: 1fr 1fr; min-width: 0; }
+.analysis-side-by-side > * + * { border-left: 1px solid #aeb5b9; }
+.analysis-side-by-side .code-map-canvas { height: 220px; }
+.contributor-flow-panel { min-width: 0; padding: 12px 16px 18px; }
+.contributor-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.contributor-heading p { margin: 4px 0 8px; color: #59666d; font-size: 11px; }
+.contributor-flow { width: 100%; height: 180px; border: 1px solid #89959c; background: #fffdf8; }
+.contributor-band { cursor: pointer; stroke: #fffdf8; stroke-width: 2; opacity: .82; }
+.contributor-band:focus-visible, .contributor-band.selected { stroke: #17202a; stroke-width: 6; opacity: 1; outline: none; }
+.band-0 { fill: #377eb8; } .band-1 { fill: #e69f00; } .band-2 { fill: #009e73; } .band-3 { fill: #cc79a7; } .band-4 { fill: #56b4e9; } .band-5 { fill: #d55e00; } .band-6 { fill: #999; }
+.contributor-legend { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
+.contributor-legend button { padding: 4px 8px 4px 20px; font-size: 11px; background-repeat: no-repeat; background-position: 6px center; background-size: 9px 9px; }
+.legend-band-0 { background-image: linear-gradient(#377eb8, #377eb8); } .legend-band-1 { background-image: linear-gradient(#e69f00, #e69f00); } .legend-band-2 { background-image: linear-gradient(#009e73, #009e73); } .legend-band-3 { background-image: linear-gradient(#cc79a7, #cc79a7); } .legend-band-4 { background-image: linear-gradient(#56b4e9, #56b4e9); } .legend-band-5 { background-image: linear-gradient(#d55e00, #d55e00); } .legend-band-6 { background-image: repeating-linear-gradient(45deg, #666 0 2px, #fff 2px 4px); }
 .ab-actions, .diff-toolbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .ab-actions button { padding: 5px 9px; font-size: 12px; }
 .ab-summary { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0; }

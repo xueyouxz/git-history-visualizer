@@ -165,3 +165,30 @@ test('代码地图支持下钻、跨视图联动和可中断的确定性播放',
   await page.waitForTimeout(350);
   await expect(selectedSubject).toHaveText('initial');
 });
+
+test('贡献者流带选择联动 DAG 与代码地图，清除后保留 A/B', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Git 历史可视化' })).toBeVisible({ timeout: 15_000 });
+  await page.getByRole('button', { name: /initial，Alice/ }).click();
+  await page.getByRole('button', { name: '设当前为 A' }).click();
+  await page.getByRole('button', { name: /add unicode guide，Bob/ }).click();
+  await page.getByRole('button', { name: '设当前为 B' }).click();
+
+  await page.getByRole('tab', { name: '贡献者' }).click();
+  await expect(page.getByText(/固定 12 个提交窗口内的变更行占比.*不能代表贡献价值/)).toBeVisible();
+  await page.getByLabel('贡献者图例').getByRole('button', { name: '贡献者 Bob' }).click();
+  await expect(page.locator('.commit-node.contributor-related')).toHaveCount(1);
+  await page.getByLabel('贡献者图例').getByRole('button', { name: '贡献者 Alice' }).click();
+  await expect(page.locator('.commit-node.contributor-related')).toHaveCount(2);
+  await page.getByLabel('贡献者图例').getByRole('button', { name: '贡献者 Bob' }).click();
+  await expect(page.locator('.commit-node.contributor-related')).toHaveCount(1);
+
+  await page.getByRole('tab', { name: '并列分析' }).click();
+  await expect(page.locator('.analysis-side-by-side .contributor-flow-panel')).toBeVisible();
+  await expect(page.locator('.analysis-side-by-side .code-map-panel')).toBeVisible();
+  await expect(page.locator('.map-file.contributor-related').first()).toBeVisible();
+  await page.getByRole('button', { name: '清除贡献者选择' }).click();
+  await expect(page.locator('.commit-node.contributor-related')).toHaveCount(0);
+  await expect(page.locator('.marker-a')).toHaveCount(1);
+  await expect(page.locator('.marker-b')).toHaveCount(1);
+});

@@ -13,3 +13,22 @@ describe('A/B 比较状态', () => {
     expect(useHistoryStore.getState()).toMatchObject({ aOid: '', bOid: '', selectedOid: 'selected' });
   });
 });
+
+describe('贡献者联动状态', () => {
+  it('选择主要贡献者或其他时计算提交和路径高亮，清除后保留原分析状态', () => {
+    const commits = [
+      { oid: 'a', parents: [], author: 'Alice', authorId: 'alice', authoredAt: '', subject: '', message: '', additions: 1, deletions: 0, filesChanged: 1, paths: ['src/a.ts'] },
+      { oid: 'b', parents: ['a'], author: 'Bob', authorId: 'bob', authoredAt: '', subject: '', message: '', additions: 1, deletions: 0, filesChanged: 1, paths: ['src/b.ts'] },
+    ];
+    useHistoryStore.setState({
+      repositoryId: 'fixture', selectedOid: 'selected', aOid: 'a', bOid: 'b', query: 'keep', boxedOids: ['a', 'b'],
+      allCommits: commits, commits,
+    });
+    useHistoryStore.getState().selectContributor('other', ['alice']);
+    expect(useHistoryStore.getState()).toMatchObject({ selectedContributorId: 'other', contributorHighlightOids: ['b'], contributorPaths: ['src/b.ts'], aOid: 'a', bOid: 'b', query: 'keep', boxedOids: ['a', 'b'] });
+    useHistoryStore.getState().selectContributor('other', ['bob']);
+    expect(useHistoryStore.getState()).toMatchObject({ selectedContributorId: 'other', contributorHighlightOids: ['a'], contributorPaths: ['src/a.ts'] });
+    useHistoryStore.getState().selectContributor('', ['alice']);
+    expect(useHistoryStore.getState()).toMatchObject({ selectedContributorId: '', contributorHighlightOids: [], contributorPaths: [], aOid: 'a', bOid: 'b', query: 'keep', boxedOids: ['a', 'b'] });
+  });
+});

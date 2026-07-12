@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { ImportService } from './import-service.js';
 import { HistoryService } from './history-service.js';
 import { isTerminalImportPhase, type ImportPhase } from '../shared/import.js';
+import { CONTRIBUTOR_ANALYSIS_VERSION } from '../shared/history.js';
 
 const json = (res: ServerResponse, status: number, body: unknown) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(body)); };
 const contentType = (file: string) => file.endsWith('.html') ? 'text/html; charset=utf-8' : file.endsWith('.js') ? 'text/javascript; charset=utf-8' : file.endsWith('.css') ? 'text/css; charset=utf-8' : 'application/octet-stream';
@@ -44,6 +45,14 @@ export function createApp(options: { managedRoot?: string; browseRoot?: string; 
           const oid = url.searchParams.get('oid') ?? '';
           if (!/^[0-9a-f]{40,64}$/.test(oid)) return json(res, 400, { error: '树提交无效' });
           return json(res, 200, await history.tree(decodeURIComponent(treeRoute[1]), oid, url.searchParams.get('path') ?? '', requestController.signal));
+        }
+        const contributorRoute = url.pathname.match(/^\/api\/repositories\/([^/]+)\/contributors$/);
+        if (contributorRoute && req.method === 'GET') {
+          const version = Number(url.searchParams.get('version') ?? CONTRIBUTOR_ANALYSIS_VERSION);
+          const windowSize = Number(url.searchParams.get('window') ?? 12);
+          if (version !== CONTRIBUTOR_ANALYSIS_VERSION) return json(res, 400, { error: '贡献者分析版本不受支持' });
+          if (!Number.isInteger(windowSize) || windowSize < 1 || windowSize > 100) return json(res, 400, { error: '贡献窗口无效' });
+          return json(res, 200, await history.contributors(decodeURIComponent(contributorRoute[1]), url.searchParams, windowSize, requestController.signal));
         }
         const diffRoute = url.pathname.match(/^\/api\/repositories\/([^/]+)\/diff$/);
         if (diffRoute && req.method === 'GET') {

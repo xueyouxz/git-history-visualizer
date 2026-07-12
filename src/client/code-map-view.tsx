@@ -38,6 +38,7 @@ export function CodeMap({ api }: { api: Api }) {
   }, [store.repositoryId, beforeOid, targetOid]);
 
   const rectangles = useMemo(() => after ? buildCodeMapLayout(before, after, currentPath, renames, 1000, 300) : [], [before, after, currentPath, renames]);
+  const contributorPaths = new Set(store.contributorPaths);
   const directories = useMemo(() => listCodeMapDirectories(rectangles, currentPath), [currentPath, rectangles]);
   const crumbs = currentPath ? currentPath.split('/') : [];
 
@@ -79,7 +80,7 @@ export function CodeMap({ api }: { api: Api }) {
     <nav className="breadcrumbs" aria-label="代码地图路径"><button onClick={() => setCurrentPath('')}>根目录</button>{crumbs.map((crumb, index) => <span key={`${crumb}-${index}`}> / <button onClick={() => setCurrentPath(crumbs.slice(0, index + 1).join('/'))}>{crumb}</button></span>)}</nav>
     <div className="code-map-legend" aria-label="代码地图图例">{Object.entries(statusLabel).map(([status, label]) => <span key={status} className={`legend-${status}`}>{label}</span>)}</div>
     <div className="code-map-canvas" role="img" aria-label={`${rectangles.length} 个文件的代码地图`}>
-      {rectangles.map(rectangle => <button key={rectangle.path} className={`map-file ${rectangle.status}`} style={{ left: `${rectangle.x / 10}%`, top: `${rectangle.y / 3}%`, width: `${rectangle.width / 10}%`, height: `${rectangle.height / 3}%` }} aria-label={`${rectangle.name}，${rectangle.bytes} 字节，${statusLabel[rectangle.status]}`} title={`${rectangle.path} · ${rectangle.bytes} 字节 · ${statusLabel[rectangle.status]}`} onMouseEnter={() => store.highlightPath(rectangle.path)} onMouseLeave={() => store.highlightPath('')}><span>{rectangle.name}</span><small>{rectangle.bytes} B</small></button>)}
+      {rectangles.map(rectangle => <button key={rectangle.path} className={`map-file ${rectangle.status} ${contributorPaths.has(rectangle.path) ? 'contributor-related' : ''}`} style={{ left: `${rectangle.x / 10}%`, top: `${rectangle.y / 3}%`, width: `${rectangle.width / 10}%`, height: `${rectangle.height / 3}%` }} aria-label={`${rectangle.name}，${rectangle.bytes} 字节，${statusLabel[rectangle.status]}`} title={`${rectangle.path} · ${rectangle.bytes} 字节 · ${statusLabel[rectangle.status]}`} onMouseEnter={() => store.highlightPath(rectangle.path)} onMouseLeave={() => store.highlightPath('')}><span>{rectangle.name}</span><small>{rectangle.bytes} B</small></button>)}
       {directories.map(directory => <div key={directory.path} className="map-directory" style={{ left: `${directory.x / 10}%`, top: `${directory.y / 3}%`, width: `${directory.width / 10}%`, height: `${directory.height / 3}%` }}><button aria-label={`目录 ${directory.path}`} onClick={() => setCurrentPath(directory.path)}>{directory.name}/</button></div>)}
     </div>
     {error && <p className="error" role="alert">{error}</p>}
