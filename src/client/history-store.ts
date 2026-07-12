@@ -101,12 +101,15 @@ export const useHistoryStore = create<HistoryState>(set => ({
   openRepository: repositoryId => set({ repositoryId, revisionFingerprint: '', selectedOid: '', aOid: '', bOid: '', hoveredOid: '', highlightedPath: '', highlightedOids: [], selectedContributorId: '', contributorMajorIds: [], contributorHighlightOids: [], contributorPaths: [], classifications: {}, classificationFilters: [], phaseAnalysis: undefined, phaseOverrides: {}, boxedOids: [], query: '', author: '', refFilter: '', changeSize: '' }),
   setHistory: (commits, refs, topology, revisionFingerprint) => set(state => {
     const available = new Set(commits.map(commit => commit.oid));
+    const revisionChanged = Boolean(state.revisionFingerprint && state.revisionFingerprint !== revisionFingerprint);
     return {
       allCommits: commits, commits, refs, topology, revisionFingerprint, mainlineRef: topology.mainlineRef,
       selectedOid: available.has(state.selectedOid) ? state.selectedOid : commits[0]?.oid ?? '',
       aOid: available.has(state.aOid) ? state.aOid : '',
       bOid: available.has(state.bOid) ? state.bOid : '',
+      refFilter: state.refFilter && refs.some(ref => ref.name === state.refFilter) ? state.refFilter : '',
       ...contributorHighlight(commits, state.selectedContributorId, state.contributorMajorIds),
+      ...(revisionChanged ? { classifications: {}, phaseAnalysis: undefined, phaseOverrides: {} } : {}),
     };
   }),
   setCommits: commits => set(state => {

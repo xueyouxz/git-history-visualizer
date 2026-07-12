@@ -59,3 +59,13 @@ describe('阶段叠加状态', () => {
     expect(useHistoryStore.getState()).toMatchObject({ allCommits: commits, commits, topology, selectedOid: 'selected', aOid: 'a', bOid: 'b', boxedOids: ['a', 'b'], highlightedPath: 'src/a.ts', phaseAnalysis: undefined, phaseOverrides: {} });
   });
 });
+
+describe('同步后状态替换', () => {
+  it('保留提交、A/B、范围和筛选，仅清除失效 ref 与旧修订分析', () => {
+    const commit = (oid: string) => ({ oid, parents: [], author: 'Alice', authorId: 'alice', authoredAt: '', subject: oid, message: oid, additions: 1, deletions: 0, filesChanged: 1, paths: ['src/a.ts'] });
+    const oldCommits = [commit('a'), commit('b')]; const nextCommits = [commit('c'), ...oldCommits];
+    useHistoryStore.setState({ revisionFingerprint: 'old', allCommits: oldCommits, commits: oldCommits, selectedOid: 'b', aOid: 'a', bOid: 'b', range: 'all', query: 'keep', author: 'Alice', refFilter: 'refs/heads/obsolete', changeSize: 'small', classificationFilters: ['docs'], boxedOids: ['a', 'b'], classifications: { a: { oid: 'a', type: 'docs', reasons: ['文档'], confidence: .8 } }, phaseAnalysis: { version: 1, revisionFingerprint: 'old', boundaries: [] }, phaseOverrides: { a: 1 } });
+    useHistoryStore.getState().setHistory(nextCommits, [{ name: 'refs/heads/main', shortName: 'main', kind: 'head', oid: 'c' }], { mainlineRef: 'refs/heads/main', nodes: [], edges: [] }, 'new');
+    expect(useHistoryStore.getState()).toMatchObject({ revisionFingerprint: 'new', selectedOid: 'b', aOid: 'a', bOid: 'b', range: 'all', query: 'keep', author: 'Alice', refFilter: '', changeSize: 'small', classificationFilters: ['docs'], boxedOids: ['a', 'b'], classifications: {}, phaseAnalysis: undefined, phaseOverrides: {} });
+  });
+});

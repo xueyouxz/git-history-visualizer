@@ -1,21 +1,31 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { EventEmitter } from 'node:events';
 import { randomBytes } from 'node:crypto';
 import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ImportService } from './import-service.js';
 import { HistoryService } from './history-service.js';
+import { SyncService } from './sync-service.js';
 import { isTerminalImportPhase, type ImportPhase } from '../shared/import.js';
 import { COMMIT_CLASSIFICATION_VERSION, CONTRIBUTOR_ANALYSIS_VERSION, PHASE_ANALYSIS_VERSION } from '../shared/history.js';
+import { isTerminalSyncPhase, type SyncPhase } from '../shared/sync.js';
 
 const json = (res: ServerResponse, status: number, body: unknown) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(body)); };
 const contentType = (file: string) => file.endsWith('.html') ? 'text/html; charset=utf-8' : file.endsWith('.js') ? 'text/javascript; charset=utf-8' : file.endsWith('.css') ? 'text/css; charset=utf-8' : 'application/octet-stream';
 const body = async (req: IncomingMessage) => { const chunks: Buffer[] = []; for await (const chunk of req) { chunks.push(chunk); if (chunks.reduce((n, b) => n + b.length, 0) > 16_384) throw new Error('请求内容过大'); } return JSON.parse(Buffer.concat(chunks).toString('utf8')); };
+const eventStream = <T extends { id: string; phase: string }>(req: IncomingMessage, res: ServerResponse, task: T, events: EventEmitter, isTerminal: (phase: T['phase']) => boolean) => {
+  res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
+  const send = (state: T) => res.write(`data: ${JSON.stringify(state)}\n\n`); send(task); if (isTerminal(task.phase)) { res.end(); return; }
+  const listener = (state: T) => { send(state); if (isTerminal(state.phase)) res.end(); };
+  events.on(task.id, listener); req.on('close', () => events.off(task.id, listener));
+};
 
 export function createApp(options: { managedRoot?: string; browseRoot?: string; configPath?: string; devMiddleware?: (req: IncomingMessage, res: ServerResponse, next: () => void) => void } = {}) {
   const token = randomBytes(24).toString('base64url');
   const imports = new ImportService(options.managedRoot, options.browseRoot, options.configPath);
   const history = new HistoryService(() => imports.root);
+  const syncs = new SyncService(history);
   const server = createServer(async (req, res) => {
     const host = req.headers.host ?? '';
     if (!/^(127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(host)) return json(res, 403, { error: 'Host 被拒绝' });
@@ -82,6 +92,16 @@ export function createApp(options: { managedRoot?: string; browseRoot?: string; 
           const commit = await history.commit(decodeURIComponent(commitRoute[1]), commitRoute[2], requestController.signal);
           return commit ? json(res, 200, commit) : json(res, 404, { error: '提交不存在' });
         }
+        const syncCollection = url.pathname.match(/^\/api\/repositories\/([^/]+)\/syncs$/);
+        if (syncCollection && req.method === 'POST') return json(res, 202, await syncs.create(decodeURIComponent(syncCollection[1])));
+        const syncTask = url.pathname.match(/^\/api\/repositories\/([^/]+)\/syncs\/([\w-]+)$/);
+        if (syncTask && req.method === 'GET') { const task = syncs.tasks.get(syncTask[2]); return task?.repositoryId === decodeURIComponent(syncTask[1]) ? json(res, 200, task) : json(res, 404, { error: '同步任务不存在' }); }
+        if (syncTask && req.method === 'DELETE') { const task = syncs.tasks.get(syncTask[2]); if (task?.repositoryId !== decodeURIComponent(syncTask[1])) return json(res, 404, { error: '同步任务不存在' }); return json(res, 200, await syncs.cancel(syncTask[2])); }
+        const syncStream = url.pathname.match(/^\/api\/repositories\/([^/]+)\/syncs\/([\w-]+)\/events$/);
+        if (syncStream && req.method === 'GET') {
+          const task = syncs.tasks.get(syncStream[2]); if (!task || task.repositoryId !== decodeURIComponent(syncStream[1])) return json(res, 404, { error: '同步任务不存在' });
+          eventStream(req, res, task, syncs.events, isTerminalSyncPhase); return;
+        }
         if (url.pathname === '/api/browse' && req.method === 'GET') return json(res, 200, await imports.browse(url.searchParams.get('path') ?? undefined));
         if (url.pathname === '/api/settings' && req.method === 'PUT') { const data = await body(req); await imports.setRoot(data.managedRoot); return json(res, 200, { managedRoot: imports.root }); }
         if (url.pathname === '/api/imports/preview' && req.method === 'POST') return json(res, 200, await imports.preview(await body(req)));
@@ -92,11 +112,7 @@ export function createApp(options: { managedRoot?: string; browseRoot?: string; 
         const stream = url.pathname.match(/^\/api\/imports\/([\w-]+)\/events$/);
         if (stream && req.method === 'GET') {
           const task = imports.tasks.get(stream[1]); if (!task) return json(res, 404, { error: '任务不存在' });
-          res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', Connection: 'keep-alive' });
-          const send = (state: unknown) => res.write(`data: ${JSON.stringify(state)}\n\n`); send(task);
-          if (isTerminalImportPhase(task.phase)) { res.end(); return; }
-          const listener = (state: { phase: ImportPhase }) => { send(state); if (isTerminalImportPhase(state.phase)) res.end(); };
-          imports.events.on(task.id, listener); req.on('close', () => imports.events.off(task.id, listener)); return;
+          eventStream(req, res, task, imports.events, isTerminalImportPhase); return;
         }
         return json(res, 404, { error: '接口不存在' });
       }
@@ -109,5 +125,5 @@ export function createApp(options: { managedRoot?: string; browseRoot?: string; 
       res.writeHead(200, { 'Content-Type': contentType(asset), 'X-Content-Type-Options': 'nosniff' }); res.end(content);
     } catch (cause) { json(res, 400, { error: cause instanceof Error ? cause.message : '请求失败' }); }
   });
-  return { server, imports, history, token };
+  return { server, imports, history, syncs, token };
 }

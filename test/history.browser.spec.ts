@@ -269,3 +269,61 @@ test('阶段分析失败和取消不影响核心视图，并支持重试', async
   await expect(page.locator('.phase-analysis')).toContainText('阶段分析已取消');
   await expect(page.locator('svg.dag')).toHaveAccessibleName(/4 个提交/);
 });
+
+test('仅显式同步并通过 SSE 更新状态，完成后保留筛选和 A/B', async ({ page }) => {
+  let syncCreates = 0;
+  await page.route('**/api/repositories/fixture/syncs', route => {
+    if (route.request().method() !== 'POST') return route.continue();
+    syncCreates += 1; return route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ id: 'sync-task', repositoryId: 'fixture', phase: 'queued', progress: 0, message: '等待同步' }) });
+  });
+  await page.route('**/api/repositories/fixture/syncs/sync-task/events', route => route.fulfill({ status: 200, contentType: 'text/event-stream', body: [
+    'data: {"id":"sync-task","repositoryId":"fixture","phase":"fetching","progress":15,"message":"正在获取远程 refs、tags 和对象"}\n\n',
+    'data: {"id":"sync-task","repositoryId":"fixture","phase":"indexing","progress":80,"message":"正在增量更新索引"}\n\n',
+    'data: {"id":"sync-task","repositoryId":"fixture","phase":"complete","progress":100,"message":"同步完成","newCommits":1}\n\n',
+  ].join('') }));
+  await page.goto('/');
+  await expect(page.locator('svg.dag')).toHaveAccessibleName(/4 个提交/, { timeout: 15_000 });
+  expect(syncCreates).toBe(0);
+  await page.getByRole('button', { name: /initial，Alice/ }).click(); await page.getByRole('button', { name: '设当前为 A' }).click();
+  await page.getByRole('button', { name: /add unicode guide，Bob/ }).click(); await page.getByRole('button', { name: '设当前为 B' }).click();
+  await page.getByRole('searchbox', { name: '搜索' }).fill('unicode');
+  await page.getByRole('checkbox', { name: 'docs' }).check();
+  await page.getByRole('button', { name: '手动同步' }).click();
+  await expect(page.getByRole('region', { name: '仓库同步' }).getByRole('status')).toContainText('同步完成');
+  expect(syncCreates).toBe(1);
+  await expect(page.getByRole('searchbox', { name: '搜索' })).toHaveValue('unicode');
+  await expect(page.getByRole('checkbox', { name: 'docs' })).toBeChecked();
+  await page.getByRole('searchbox', { name: '搜索' }).fill(''); await page.getByRole('checkbox', { name: 'docs' }).uncheck();
+  await expect(page.locator('.marker-a')).toHaveCount(1); await expect(page.locator('.marker-b')).toHaveCount(1);
+});
+
+test('同步可取消并显示可恢复错误', async ({ page }) => {
+  let attempt = 0;
+  await page.route('**/api/repositories/fixture/syncs', route => {
+    if (route.request().method() !== 'POST') return route.continue();
+    attempt += 1; const id = attempt === 1 ? 'cancel-task' : 'error-task';
+    return route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ id, repositoryId: 'fixture', phase: 'queued', progress: 0, message: '等待同步' }) });
+  });
+  await page.route('**/syncs/cancel-task/events', route => route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'data: {"id":"cancel-task","repositoryId":"fixture","phase":"fetching","progress":15,"message":"正在获取"}\n\n' }));
+  await page.route('**/syncs/cancel-task', route => route.request().method() === 'DELETE' ? route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ id: 'cancel-task', repositoryId: 'fixture', phase: 'cancelled', progress: 15, message: '同步已取消', recoverable: true }) }) : route.continue());
+  await page.route('**/syncs/error-task/events', route => route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'data: {"id":"error-task","repositoryId":"fixture","phase":"error","progress":15,"message":"远程不可用","recoverable":true}\n\n' }));
+  await page.goto('/'); await expect(page.locator('svg.dag')).toHaveAccessibleName(/4 个提交/, { timeout: 15_000 });
+  await page.getByRole('button', { name: '手动同步' }).click(); await page.getByRole('button', { name: '取消同步' }).click();
+  await expect(page.getByRole('region', { name: '仓库同步' })).toContainText('同步已取消');
+  await page.getByRole('button', { name: '重试同步' }).click();
+  await expect(page.getByRole('region', { name: '仓库同步' })).toContainText('远程不可用');
+  await expect(page.getByRole('button', { name: '重试同步' })).toBeEnabled();
+  await expect(page.locator('svg.dag')).toHaveAccessibleName(/4 个提交/);
+});
+
+test('同步 SSE 断线后可重新连接而不创建重复任务', async ({ page }) => {
+  let creates = 0; let streams = 0;
+  await page.route('**/api/repositories/fixture/syncs', route => { if (route.request().method() !== 'POST') return route.continue(); creates += 1; return route.fulfill({ status: 202, contentType: 'application/json', body: JSON.stringify({ id: 'reconnect-task', repositoryId: 'fixture', phase: 'queued', progress: 0, message: '等待同步' }) }); });
+  await page.route('**/syncs/reconnect-task/events', route => { streams += 1; return streams === 1 ? route.fulfill({ status: 500, contentType: 'application/json', body: '{}' }) : route.fulfill({ status: 200, contentType: 'text/event-stream', body: 'data: {"id":"reconnect-task","repositoryId":"fixture","phase":"complete","progress":100,"message":"同步完成","newCommits":1}\n\n' }); });
+  await page.goto('/'); await expect(page.locator('svg.dag')).toHaveAccessibleName(/4 个提交/, { timeout: 15_000 });
+  await page.getByRole('button', { name: '手动同步' }).click();
+  await expect(page.getByRole('region', { name: '仓库同步' }).getByRole('alert')).toContainText('无法读取任务进度');
+  await page.getByRole('button', { name: '重新连接同步' }).click();
+  await expect(page.getByRole('region', { name: '仓库同步' }).getByRole('status')).toContainText('同步完成');
+  expect(creates).toBe(1); expect(streams).toBe(2);
+});

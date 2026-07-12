@@ -9,6 +9,8 @@ import { DiffInspector } from './diff-inspector';
 import { CodeMap } from './code-map-view';
 import { ContributorFlow } from './contributor-flow';
 import { PhaseAnalysis } from './phase-analysis';
+import { SyncControl } from './sync-control';
+import { consumeSse } from './sse';
 import type { Api } from './api';
 import { historyFilterParameters } from './history-filters';
 
@@ -39,18 +41,7 @@ function ImportPanel({ session, api, onImported, onRootChanged }: { session: Ses
   };
   const stream = async (id: string) => {
     const controller = new AbortController(); streamController.current?.abort(); streamController.current = controller;
-    const response = await fetch(`/api/imports/${id}/events`, { headers: { 'X-Session-Token': session.token }, signal: controller.signal });
-    if (!response.ok || !response.body) throw new Error('无法读取导入进度');
-    const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = '';
-    while (true) {
-      const { done, value } = await reader.read(); buffer += decoder.decode(value, { stream: !done });
-      const frames = buffer.split('\n\n'); buffer = frames.pop() ?? '';
-      for (const frame of frames) {
-        const data = frame.split('\n').find(part => part.startsWith('data: '));
-        if (data) { const state = JSON.parse(data.slice(6)) as TaskState; setTask(state); if (state.phase === 'complete') onImported(); }
-      }
-      if (done) break;
-    }
+    await consumeSse<TaskState>(`/api/imports/${id}/events`, session.token, controller.signal, state => { setTask(state); if (state.phase === 'complete') onImported(); });
   };
   const start = async () => {
     if (!preview) return;
@@ -147,11 +138,12 @@ function HistoryGraph() {
   </section>;
 }
 
-function Workspace({ api }: { api: Api }) {
+function Workspace({ api, session }: { api: Api; session: Session }) {
   const store = useHistoryStore();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [dockMode, setDockMode] = useState<'diff' | 'map' | 'contributors' | 'combined'>('diff');
+  const [refreshVersion, setRefreshVersion] = useState(0);
   const selected = store.allCommits.find(commit => commit.oid === store.selectedOid);
   const selectedClassification = selected ? store.classifications[selected.oid] : undefined;
   const hovered = store.commits.find(commit => commit.oid === store.hoveredOid);
@@ -159,14 +151,15 @@ function Workspace({ api }: { api: Api }) {
   useEffect(() => {
     if (!store.repositoryId) return;
     const controller = new AbortController(); setLoading(true); setError('');
-    Promise.all([
-      api<RepositoryIndex>(`/api/repositories/${encodeURIComponent(store.repositoryId)}`, { signal: controller.signal }),
-      api<RepositoryTopology>(`/api/repositories/${encodeURIComponent(store.repositoryId)}/topology`, { signal: controller.signal }),
-    ]).then(([index, topology]) => store.setHistory(index.commits, index.refs, topology, index.revisionFingerprint)).catch(cause => { if (cause.name !== 'AbortError') setError(cause.message); }).finally(() => setLoading(false));
-    api<RepositoryClassifications>(`/api/repositories/${encodeURIComponent(store.repositoryId)}/classifications?version=${COMMIT_CLASSIFICATION_VERSION}`, { signal: controller.signal })
-      .then(classifications => store.setClassifications(classifications.results)).catch(cause => { if (cause.name !== 'AbortError') setError(cause.message); });
+    api<RepositoryIndex>(`/api/repositories/${encodeURIComponent(store.repositoryId)}`, { signal: controller.signal }).then(async index => {
+      const mainlineRef = index.refs.some(ref => ref.name === store.mainlineRef) ? store.mainlineRef : index.defaultRef;
+      const topology = await api<RepositoryTopology>(`/api/repositories/${encodeURIComponent(store.repositoryId)}/topology?mainlineRef=${encodeURIComponent(mainlineRef)}`, { signal: controller.signal });
+      store.setHistory(index.commits, index.refs, topology, index.revisionFingerprint);
+      void api<RepositoryClassifications>(`/api/repositories/${encodeURIComponent(store.repositoryId)}/classifications?version=${COMMIT_CLASSIFICATION_VERSION}`, { signal: controller.signal })
+        .then(classifications => store.setClassifications(classifications.results)).catch(cause => { if (cause.name !== 'AbortError') setError(cause.message); });
+    }).catch(cause => { if (cause.name !== 'AbortError') setError(cause.message); }).finally(() => setLoading(false));
     return () => controller.abort();
-  }, [store.repositoryId]);
+  }, [store.repositoryId, refreshVersion]);
   useEffect(() => {
     if (!store.repositoryId) return;
     const controller = new AbortController();
@@ -175,7 +168,7 @@ function Workspace({ api }: { api: Api }) {
       api<IndexedCommit[]>(`/api/repositories/${encodeURIComponent(store.repositoryId)}/commits?${parameters}`, { signal: controller.signal }).then(store.setCommits).catch(cause => { if (cause.name !== 'AbortError') setError(cause.message); });
     }, 180);
     return () => { window.clearTimeout(timer); controller.abort(); };
-  }, [store.repositoryId, store.query, store.author, store.refFilter, store.changeSize, store.classificationFilters]);
+  }, [store.repositoryId, store.query, store.author, store.refFilter, store.changeSize, store.classificationFilters, refreshVersion]);
   useEffect(() => {
     if (!store.repositoryId) return;
     const parameters = new URLSearchParams(); parameters.set('repository', store.repositoryId);
@@ -187,7 +180,7 @@ function Workspace({ api }: { api: Api }) {
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
   };
   return <div className="workspace">
-    <aside className="sidebar"><label>仓库<select value={store.repositoryId} onChange={event => store.openRepository(event.target.value)}>{store.repositories.map(repository => <option key={repository.id} value={repository.id}>{repository.name} ({repository.commitCount})</option>)}</select></label><label>主线<select value={store.mainlineRef} onChange={event => void switchMainline(event.target.value)}>{store.refs.map(ref => <option key={ref.name} value={ref.name}>{ref.shortName}</option>)}</select></label><label>搜索<input type="search" value={store.query} onChange={event => store.setQuery(event.target.value)} placeholder="消息、OID、作者或路径" /></label><label>作者<select value={store.author} onChange={event => store.setAuthor(event.target.value)}><option value="">全部作者</option>{authors.map(author => <option key={author}>{author}</option>)}</select></label><label>引用<select value={store.refFilter} onChange={event => store.setRefFilter(event.target.value)}><option value="">全部引用</option>{store.refs.map(ref => <option key={ref.name} value={ref.name}>{ref.shortName}</option>)}</select></label><label>变更规模<select value={store.changeSize} onChange={event => store.setChangeSize(event.target.value as ChangeSizeFilter)}><option value="">全部规模</option><option value="small">小，最多 {CHANGE_SIZE_LIMITS.small} 行</option><option value="medium">中，{CHANGE_SIZE_LIMITS.small + 1}–{CHANGE_SIZE_LIMITS.medium} 行</option><option value="large">大，超过 {CHANGE_SIZE_LIMITS.medium} 行</option></select></label><fieldset className="classification-legend"><legend>提交类型</legend>{COMMIT_TYPES.map(type => <label key={type} className={`classification-option classification-${type.replace('/', '-')}`}><input type="checkbox" checked={store.classificationFilters.includes(type)} onChange={() => store.toggleClassification(type as CommitType)} />{type}</label>)}</fieldset><p className="muted">当前范围：全部可达提交</p></aside>
+    <aside className="sidebar"><label>仓库<select value={store.repositoryId} onChange={event => store.openRepository(event.target.value)}>{store.repositories.map(repository => <option key={repository.id} value={repository.id}>{repository.name} ({repository.commitCount})</option>)}</select></label><label>主线<select value={store.mainlineRef} onChange={event => void switchMainline(event.target.value)}>{store.refs.map(ref => <option key={ref.name} value={ref.name}>{ref.shortName}</option>)}</select></label><label>搜索<input type="search" value={store.query} onChange={event => store.setQuery(event.target.value)} placeholder="消息、OID、作者或路径" /></label><label>作者<select value={store.author} onChange={event => store.setAuthor(event.target.value)}><option value="">全部作者</option>{authors.map(author => <option key={author}>{author}</option>)}</select></label><label>引用<select value={store.refFilter} onChange={event => store.setRefFilter(event.target.value)}><option value="">全部引用</option>{store.refs.map(ref => <option key={ref.name} value={ref.name}>{ref.shortName}</option>)}</select></label><label>变更规模<select value={store.changeSize} onChange={event => store.setChangeSize(event.target.value as ChangeSizeFilter)}><option value="">全部规模</option><option value="small">小，最多 {CHANGE_SIZE_LIMITS.small} 行</option><option value="medium">中，{CHANGE_SIZE_LIMITS.small + 1}–{CHANGE_SIZE_LIMITS.medium} 行</option><option value="large">大，超过 {CHANGE_SIZE_LIMITS.medium} 行</option></select></label><fieldset className="classification-legend"><legend>提交类型</legend>{COMMIT_TYPES.map(type => <label key={type} className={`classification-option classification-${type.replace('/', '-')}`}><input type="checkbox" checked={store.classificationFilters.includes(type)} onChange={() => store.toggleClassification(type as CommitType)} />{type}</label>)}</fieldset><SyncControl api={api} token={session.token} repositoryId={store.repositoryId} onComplete={() => setRefreshVersion(version => version + 1)} /><p className="muted">当前范围：全部可达提交</p></aside>
     <HistoryGraph />
     <aside className="inspector"><p className="eyebrow">提交检查器</p><PhaseAnalysis api={api} />{loading ? <p>正在索引…</p> : selected ? <><h2>{selected.subject}</h2><code className="full-oid">{selected.oid}</code><dl><div><dt>作者</dt><dd>{selected.author}</dd></div><div><dt>父提交</dt><dd>{selected.parents.length || '无'} 个</dd></div><div><dt>变更</dt><dd>{selected.filesChanged} 文件，+{selected.additions}/-{selected.deletions}</dd></div></dl>{selectedClassification && <section className="commit-classification" aria-label="提交分类"><h3>分类：{selectedClassification.type}</h3><p>置信度 {Math.round(selectedClassification.confidence * 100)}%</p><ul>{selectedClassification.reasons.map(reason => <li key={reason}>{reason}</li>)}</ul></section>}<p>{selected.message}</p><h3>相关路径</h3><ul className="paths">{(hovered ?? selected).paths.map(path => <li key={path}><code>{path}</code></li>)}</ul></> : <p>当前筛选没有提交。</p>}{error && <p className="error" role="alert">{error}</p>}</aside>
     <section className="analysis-dock" aria-label="分析坞">
@@ -222,7 +215,7 @@ function App() {
   useEffect(() => { fetch('/api/session').then(response => response.json()).then(setSession); }, []);
   useEffect(() => { if (session) void loadRepositories(); }, [session]);
   if (!session) return <main className="loading">正在启动本地工作台…</main>;
-  return <main><header><div><p className="eyebrow">本地只读工作台</p><h1>{repositories.length && !showImport ? 'Git 历史可视化' : '导入 Git 仓库'}</h1></div><div className="actions">{repositories.length > 0 && <button onClick={() => setShowImport(value => !value)}>{showImport ? '返回历史' : '导入其他仓库'}</button>}</div></header>{showImport || repositories.length === 0 ? <ImportPanel session={session} api={api} onImported={() => void loadRepositories()} onRootChanged={managedRoot => setSession(current => current && ({ ...current, managedRoot }))} /> : <Workspace api={api} />}</main>;
+  return <main><header><div><p className="eyebrow">本地只读工作台</p><h1>{repositories.length && !showImport ? 'Git 历史可视化' : '导入 Git 仓库'}</h1></div><div className="actions">{repositories.length > 0 && <button onClick={() => setShowImport(value => !value)}>{showImport ? '返回历史' : '导入其他仓库'}</button>}</div></header>{showImport || repositories.length === 0 ? <ImportPanel session={session} api={api} onImported={() => void loadRepositories()} onRootChanged={managedRoot => setSession(current => current && ({ ...current, managedRoot }))} /> : <Workspace api={api} session={session} />}</main>;
 }
 
 createRoot(document.getElementById('root')!).render(<App />);

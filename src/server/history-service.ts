@@ -23,6 +23,7 @@ import {
 import { analyzeContributors } from './contributor-analysis.js';
 import { classifyCommit } from './commit-classification.js';
 import { analyzePhases } from './phase-analysis.js';
+import type { SyncPhase } from '../shared/sync.js';
 
 const gitEnvironment = {
   GIT_OPTIONAL_LOCKS: '0',
@@ -162,6 +163,9 @@ async function readCommit(repository: string, oid: string, parents: string[], si
 
 export class HistoryService {
   private readonly indexes = new Map<string, RepositoryIndex>();
+  private readonly latestIndexes = new Map<string, RepositoryIndex>();
+  private readonly refreshing = new Set<string>();
+  private readonly heldIndexes = new Set<string>();
 
   constructor(private readonly managedRoot: () => string) {}
 
@@ -191,33 +195,37 @@ export class HistoryService {
     return repositories;
   }
 
-  async index(id: string, signal?: AbortSignal): Promise<RepositoryIndex> {
+  async index(id: string, signal?: AbortSignal, forceRefresh = false): Promise<RepositoryIndex> {
+    const latest = this.latestIndexes.get(id);
+    if (!forceRefresh && latest && (this.refreshing.has(id) || this.heldIndexes.has(id))) return latest;
     const repository = await this.repositoryPath(id);
     const refs = await readRefs(repository, signal);
     if (!refs.length) throw new Error('仓库没有可索引的公开引用');
     const revisionFingerprint = createHash('sha256').update(refs.map(ref => `${ref.name}\0${ref.oid}`).join('\n')).digest('hex');
     const cacheKey = `${id}:${revisionFingerprint}:${REPOSITORY_INDEX_VERSION}`;
     const cached = this.indexes.get(cacheKey);
-    if (cached) return cached;
+    if (cached) { this.latestIndexes.set(id, cached); return cached; }
     const cacheDirectory = path.join(path.resolve(this.managedRoot()), '.ghv-cache', id, revisionFingerprint);
     const cacheFile = path.join(cacheDirectory, `index-v${REPOSITORY_INDEX_VERSION}.json`);
     const stored = await readJson<RepositoryIndex>(cacheFile);
     if (stored?.version === REPOSITORY_INDEX_VERSION && stored.id === id && stored.revisionFingerprint === revisionFingerprint) {
       this.indexes.set(cacheKey, stored);
+      this.latestIndexes.set(id, stored);
       return stored;
     }
-    const index = await this.buildIndex(id, repository, refs, revisionFingerprint, signal);
+    const index = await this.buildIndex(id, repository, refs, revisionFingerprint, latest, signal);
     await writeJsonAtomically(cacheFile, index);
     this.indexes.set(cacheKey, index);
+    this.latestIndexes.set(id, index);
     return index;
   }
 
-  private async buildIndex(id: string, repository: string, refs: RepositoryRef[], revisionFingerprint: string, signal?: AbortSignal): Promise<RepositoryIndex> {
+  private async buildIndex(id: string, repository: string, refs: RepositoryRef[], revisionFingerprint: string, previous?: RepositoryIndex, signal?: AbortSignal): Promise<RepositoryIndex> {
     const roots = [...new Set(refs.map(ref => ref.oid))];
     const graph = await runGit(repository, ['rev-list', '--topo-order', '--parents', ...roots], signal);
     const rows = graph.trim().split('\n').filter(Boolean).map(row => row.split(' '));
-    const commits: IndexedCommit[] = [];
-    for (const [oid, ...parents] of rows) commits.push(await readCommit(repository, oid, parents, signal));
+    const previousCommits = new Map(previous?.commits.map(commit => [commit.oid, commit]) ?? []); const commits: IndexedCommit[] = [];
+    for (const [oid, ...parents] of rows) commits.push(previousCommits.get(oid) ?? await readCommit(repository, oid, parents, signal));
     const symbolicHead = (await runGit(repository, ['symbolic-ref', '-q', 'HEAD'], signal).catch(() => '')).trim();
     const defaultRef = refs.some(ref => ref.name === symbolicHead)
       ? symbolicHead
@@ -414,5 +422,19 @@ export class HistoryService {
       files.push({ ...change, additions: statistic.additions, deletions: statistic.deletions, binary, unknownEncoding, truncated, patch });
     }
     return { a: options.a, b: options.b, effectiveA, parentIndex, relation, commonAncestor, pathA, pathB, files, truncated: totalTruncated, totalPatchBytes };
+  }
+
+  async synchronize(id: string, signal: AbortSignal, progress: (phase: Extract<SyncPhase, 'fetching' | 'indexing'>, progress: number, message: string) => void) {
+    const previous = await this.index(id, signal); this.refreshing.add(id); this.heldIndexes.delete(id);
+    try {
+      const repository = await this.repositoryPath(id); progress('fetching', 15, '正在获取远程 refs、tags 和对象');
+      await runGit(repository, ['fetch', '--atomic', '--prune', '--prune-tags', '--tags', 'origin', '+refs/heads/*:refs/remotes/origin/*', '+refs/tags/*:refs/tags/*'], signal, 4 * 1024 * 1024);
+      progress('indexing', 80, '正在增量更新索引'); const next = await this.index(id, signal, true);
+      this.refreshing.delete(id); this.heldIndexes.delete(id);
+      const previousOids = new Set(previous.commits.map(commit => commit.oid)); const nextRefs = new Set(next.refs.map(ref => ref.name));
+      return { newCommits: next.commits.filter(commit => !previousOids.has(commit.oid)).length, removedRefs: previous.refs.filter(ref => !nextRefs.has(ref.name)).length };
+    } catch (cause) {
+      this.refreshing.delete(id); this.heldIndexes.add(id); throw cause;
+    }
   }
 }
