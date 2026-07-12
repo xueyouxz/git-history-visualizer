@@ -168,6 +168,7 @@ export class HistoryService {
   private readonly heldIndexes = new Set<string>();
 
   constructor(private readonly managedRoot: () => string) {}
+  async repositoryLocation(id: string) { return this.repositoryPath(id); }
 
   private async repositoryPath(id: string) {
     if (!/^[\p{L}\p{N}._-]+$/u.test(id) || id === '.' || id === '..') throw new Error('仓库标识无效');

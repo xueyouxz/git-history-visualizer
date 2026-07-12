@@ -48,6 +48,15 @@ progress { width: 100%; accent-color: #245f89; }
 .sync-control > button { width: 100%; }
 .sync-status { display: grid; gap: 5px; padding: 7px; border-left: 3px solid #245f89; background: #eef3f5; font-size: 11px; }
 .sync-status button { padding: 4px 7px; }
+.worktree-control { display: grid; gap: 8px; margin: 12px 0; padding: 10px 0; border-block: 1px solid #d3d7d9; font-size: 12px; }
+.worktree-control h3 { margin: 0; }
+.worktree-control select, .worktree-control input { min-height: 32px; padding: 5px 7px; }
+.worktree-control details { display: grid; gap: 7px; }
+.worktree-control summary { margin-bottom: 7px; cursor: pointer; font-weight: 700; }
+.worktree-control details label, .worktree-control details button { margin-top: 7px; }
+.worktree-list { display: grid; gap: 8px; margin: 4px 0 0; padding: 0; list-style: none; }
+.worktree-list li { display: grid; gap: 4px; padding: 7px; border: 1px solid #d3d7d9; overflow-wrap: anywhere; }
+.worktree-list button { padding: 4px 7px; }
 .commit-classification { margin: 12px 0; padding: 8px 10px; border-left: 4px solid #245f89; background: #eef3f5; font-size: 12px; }
 .commit-classification h3, .commit-classification p { margin: 2px 0 6px; }
 .commit-classification ul { margin: 0; padding-left: 18px; }

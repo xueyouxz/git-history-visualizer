@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { promises as fs, readFileSync } from 'node:fs';
+import { promises as fs } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -7,6 +7,7 @@ import { isIP } from 'node:net';
 import { lookup } from 'node:dns/promises';
 import { EventEmitter } from 'node:events';
 import { isTerminalImportPhase, type ImportPreview, type ImportRequest, type TaskState } from '../shared/import.js';
+import { ConfigStore } from './config-store.js';
 
 type ValidatedImport = { request: ImportRequest; remoteResolutions: string[] };
 type ImportExecution = { controller: AbortController; destination: string; promise?: Promise<void> };
@@ -59,18 +60,11 @@ export class ImportService {
   readonly tasks = new Map<string, TaskState>();
   private managedRoot: string;
   private readonly browseRoot: string;
-  private readonly configPath: string;
+  private readonly config: ConfigStore;
   private readonly executions = new Map<string, ImportExecution>();
-  constructor(managedRoot?: string, browseRoot = homedir(), configPath = path.join(homedir(), '.git-history-visualizer', 'config.json')) {
-    this.configPath = path.resolve(configPath);
-    let configuredRoot: string | undefined;
-    if (!managedRoot) {
-      try {
-        const parsed = JSON.parse(readFileSync(this.configPath, 'utf8')) as { managedRoot?: unknown };
-        if (typeof parsed.managedRoot === 'string' && path.isAbsolute(parsed.managedRoot)) configuredRoot = parsed.managedRoot;
-      } catch { /* Use the default when configuration is absent or invalid. */ }
-    }
-    this.managedRoot = path.resolve(managedRoot ?? configuredRoot ?? path.join(homedir(), '.git-history-visualizer', 'repositories'));
+  constructor(managedRoot?: string, browseRoot = homedir(), config = new ConfigStore()) {
+    this.config = config;
+    this.managedRoot = path.resolve(managedRoot ?? config.value.managedRoot ?? path.join(homedir(), '.git-history-visualizer', 'repositories'));
     this.browseRoot = path.resolve(browseRoot);
   }
   get root() { return this.managedRoot; }
@@ -78,14 +72,7 @@ export class ImportService {
     if (!path.isAbsolute(next)) throw new Error('受管根目录必须是绝对路径');
     await fs.mkdir(next, { recursive: true });
     const resolvedRoot = await fs.realpath(next);
-    await fs.mkdir(path.dirname(this.configPath), { recursive: true });
-    const temporary = `${this.configPath}.${randomUUID()}.tmp`;
-    try {
-      await fs.writeFile(temporary, JSON.stringify({ managedRoot: resolvedRoot }, null, 2), { mode: 0o600 });
-      await fs.rename(temporary, this.configPath);
-    } finally {
-      await fs.rm(temporary, { force: true });
-    }
+    await this.config.update({ managedRoot: resolvedRoot });
     this.managedRoot = resolvedRoot;
   }
   async browse(input = this.browseRoot) {

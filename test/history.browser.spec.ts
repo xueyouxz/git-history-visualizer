@@ -1,5 +1,22 @@
 import { expect, test } from '@playwright/test';
 
+test('历史版本工作区只在显式点击后创建', async ({ page }) => {
+  let creates = 0;
+  await page.route('**/api/repositories/fixture/worktrees', route => {
+    if (route.request().method() === 'GET') return route.fulfill({ status: 200, contentType: 'application/json', body: '[]' });
+    creates += 1;
+    const body = route.request().postDataJSON() as { oid: string; target: string };
+    return route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ repositoryId: 'fixture', oid: body.oid, path: `/tmp/${body.oid}`, createdAt: '2026-07-12T00:00:00.000Z', dirty: false, status: '', reused: false }) });
+  });
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Git 历史可视化' })).toBeVisible({ timeout: 15_000 });
+  await page.getByRole('button', { name: /initial，Alice/ }).click();
+  expect(creates).toBe(0);
+  await page.getByLabel('打开位置').selectOption('terminal');
+  await page.getByRole('button', { name: '打开此版本' }).click();
+  await expect.poll(() => creates).toBe(1);
+});
+
 test('探索 DAG 时缩放、选择、搜索、筛选、主线和框选状态一致', async ({ page }) => {
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Git 历史可视化' })).toBeVisible({ timeout: 15_000 });

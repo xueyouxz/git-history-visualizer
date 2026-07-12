@@ -7,6 +7,8 @@ import { fileURLToPath } from 'node:url';
 import { ImportService } from './import-service.js';
 import { HistoryService } from './history-service.js';
 import { SyncService } from './sync-service.js';
+import { ConfigStore } from './config-store.js';
+import { WorktreeService } from './worktree-service.js';
 import { isTerminalImportPhase, type ImportPhase } from '../shared/import.js';
 import { COMMIT_CLASSIFICATION_VERSION, CONTRIBUTOR_ANALYSIS_VERSION, PHASE_ANALYSIS_VERSION } from '../shared/history.js';
 import { isTerminalSyncPhase, type SyncPhase } from '../shared/sync.js';
@@ -21,11 +23,13 @@ const eventStream = <T extends { id: string; phase: string }>(req: IncomingMessa
   events.on(task.id, listener); req.on('close', () => events.off(task.id, listener));
 };
 
-export function createApp(options: { managedRoot?: string; browseRoot?: string; configPath?: string; devMiddleware?: (req: IncomingMessage, res: ServerResponse, next: () => void) => void } = {}) {
+export function createApp(options: { managedRoot?: string; browseRoot?: string; configPath?: string; launchExternal?: (executable: string, args: string[]) => Promise<void>; devMiddleware?: (req: IncomingMessage, res: ServerResponse, next: () => void) => void } = {}) {
   const token = randomBytes(24).toString('base64url');
-  const imports = new ImportService(options.managedRoot, options.browseRoot, options.configPath);
+  const config = new ConfigStore(options.configPath);
+  const imports = new ImportService(options.managedRoot, options.browseRoot, config);
   const history = new HistoryService(() => imports.root);
   const syncs = new SyncService(history);
+  const worktrees = new WorktreeService(() => imports.root, history, config, options.launchExternal);
   const server = createServer(async (req, res) => {
     const host = req.headers.host ?? '';
     if (!/^(127\.0\.0\.1|localhost|\[::1\]):\d+$/.test(host)) return json(res, 403, { error: 'Host 被拒绝' });
@@ -92,6 +96,11 @@ export function createApp(options: { managedRoot?: string; browseRoot?: string; 
           const commit = await history.commit(decodeURIComponent(commitRoute[1]), commitRoute[2], requestController.signal);
           return commit ? json(res, 200, commit) : json(res, 404, { error: '提交不存在' });
         }
+        const worktreeCollection = url.pathname.match(/^\/api\/repositories\/([^/]+)\/worktrees$/);
+        if (worktreeCollection && req.method === 'GET') return json(res, 200, await worktrees.list(decodeURIComponent(worktreeCollection[1])));
+        if (worktreeCollection && req.method === 'POST') { const data = await body(req); return json(res, 201, await worktrees.open(decodeURIComponent(worktreeCollection[1]), data.oid, data.target)); }
+        const worktreeItem = url.pathname.match(/^\/api\/repositories\/([^/]+)\/worktrees\/([0-9a-f]{40,64})$/);
+        if (worktreeItem && req.method === 'DELETE') return json(res, 200, await worktrees.remove(decodeURIComponent(worktreeItem[1]), worktreeItem[2]));
         const syncCollection = url.pathname.match(/^\/api\/repositories\/([^/]+)\/syncs$/);
         if (syncCollection && req.method === 'POST') return json(res, 202, await syncs.create(decodeURIComponent(syncCollection[1])));
         const syncTask = url.pathname.match(/^\/api\/repositories\/([^/]+)\/syncs\/([\w-]+)$/);
@@ -103,7 +112,8 @@ export function createApp(options: { managedRoot?: string; browseRoot?: string; 
           eventStream(req, res, task, syncs.events, isTerminalSyncPhase); return;
         }
         if (url.pathname === '/api/browse' && req.method === 'GET') return json(res, 200, await imports.browse(url.searchParams.get('path') ?? undefined));
-        if (url.pathname === '/api/settings' && req.method === 'PUT') { const data = await body(req); await imports.setRoot(data.managedRoot); return json(res, 200, { managedRoot: imports.root }); }
+        if (url.pathname === '/api/settings' && req.method === 'GET') return json(res, 200, { managedRoot: imports.root, editor: config.value.editor });
+        if (url.pathname === '/api/settings' && req.method === 'PUT') { const data = await body(req); if (data.editor !== undefined) await config.update({ editor: data.editor }); if (data.managedRoot !== undefined) await imports.setRoot(data.managedRoot); return json(res, 200, { managedRoot: imports.root, editor: config.value.editor }); }
         if (url.pathname === '/api/imports/preview' && req.method === 'POST') return json(res, 200, await imports.preview(await body(req)));
         if (url.pathname === '/api/imports' && req.method === 'POST') return json(res, 202, await imports.create(await body(req)));
         const match = url.pathname.match(/^\/api\/imports\/([\w-]+)$/);
@@ -125,5 +135,5 @@ export function createApp(options: { managedRoot?: string; browseRoot?: string; 
       res.writeHead(200, { 'Content-Type': contentType(asset), 'X-Content-Type-Options': 'nosniff' }); res.end(content);
     } catch (cause) { json(res, 400, { error: cause instanceof Error ? cause.message : '请求失败' }); }
   });
-  return { server, imports, history, syncs, token };
+  return { server, imports, history, syncs, worktrees, config, token };
 }
