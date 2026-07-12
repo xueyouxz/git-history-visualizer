@@ -47,11 +47,24 @@ progress { width: 100%; accent-color: #245f89; }
 .commit-classification { margin: 12px 0; padding: 8px 10px; border-left: 4px solid #245f89; background: #eef3f5; font-size: 12px; }
 .commit-classification h3, .commit-classification p { margin: 2px 0 6px; }
 .commit-classification ul { margin: 0; padding-left: 18px; }
+.phase-analysis { margin: 10px 0 14px; padding: 9px 0 12px; border-bottom: 1px solid #d3d7d9; font-size: 12px; }
+.phase-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.phase-heading div { display: flex; gap: 4px; }
+.phase-heading button, .phase-analysis > button { padding: 4px 7px; font-size: 11px; }
+.phase-analysis p { margin: 7px 0; }
+.phase-boundaries { display: grid; gap: 9px; margin: 9px 0 0; padding-left: 22px; }
+.phase-boundaries label { gap: 3px; font-size: 11px; }
+.phase-boundaries input[type="range"] { min-height: 20px; padding: 0; }
+.phase-boundaries small { display: block; margin-top: 2px; }
 .graph-panel { min-width: 0; display: grid; grid-template-rows: 49px minmax(0, 1fr) auto auto; background: #fffdf8; overflow: hidden; }
 .graph-toolbar { display: flex; align-items: center; justify-content: space-between; padding: 8px 16px; border-bottom: 1px solid #d3d7d9; }
 .zoom-levels button { padding: 5px 10px; font-size: 12px; }
 .dag { width: 100%; height: 100%; touch-action: none; user-select: none; background: #fffdf8; }
 .edge { fill: none; stroke: #aeb5b9; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.phase-region { pointer-events: none; }
+.phase-region rect { fill: #eef3f5; stroke: #d3d7d9; stroke-width: 1; }
+.phase-region.phase-1 rect { fill: #f3efe4; }
+.phase-region text { fill: #59666d; font-size: 10px; font-weight: 700; }
 .edge.related { stroke: #245f89; stroke-width: 3; }
 .commit-node { cursor: pointer; }
 .commit-node circle { stroke-width: 2; vector-effect: non-scaling-stroke; pointer-events: none; }

@@ -45,3 +45,17 @@ describe('提交分类筛选状态', () => {
     expect(useHistoryStore.getState()).toMatchObject({ classificationFilters: ['docs'], selectedOid: 'selected', aOid: 'a', bOid: 'b' });
   });
 });
+
+describe('阶段叠加状态', () => {
+  it('调整、关闭或失败清除阶段结果不改变提交、拓扑、选择、A/B、框选和路径状态', () => {
+    const analysis = { version: 1 as const, revisionFingerprint: 'revision', boundaries: [{ oid: 'b', order: 2, score: 4, reasons: ['tag v1'] }] };
+    const commits = [{ oid: 'a', parents: [], author: 'Alice', authorId: 'alice', authoredAt: '', subject: 'initial', message: 'initial', additions: 1, deletions: 0, filesChanged: 1, paths: ['src/a.ts'] }];
+    const topology = { mainlineRef: 'refs/heads/main', nodes: [{ oid: 'a', order: 0, lane: 0, isMainline: true }], edges: [] };
+    useHistoryStore.setState({ allCommits: commits, commits, topology, selectedOid: 'selected', aOid: 'a', bOid: 'b', boxedOids: ['a', 'b'], highlightedPath: 'src/a.ts', phaseAnalysis: undefined, phaseOverrides: {} });
+    useHistoryStore.getState().setPhaseAnalysis(analysis, {});
+    useHistoryStore.getState().setPhaseBoundary('b', 1);
+    expect(useHistoryStore.getState()).toMatchObject({ selectedOid: 'selected', aOid: 'a', bOid: 'b', boxedOids: ['a', 'b'], phaseOverrides: { b: 1 } });
+    useHistoryStore.getState().clearPhaseAnalysis();
+    expect(useHistoryStore.getState()).toMatchObject({ allCommits: commits, commits, topology, selectedOid: 'selected', aOid: 'a', bOid: 'b', boxedOids: ['a', 'b'], highlightedPath: 'src/a.ts', phaseAnalysis: undefined, phaseOverrides: {} });
+  });
+});

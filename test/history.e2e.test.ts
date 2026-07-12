@@ -318,4 +318,26 @@ describe('提交历史 REST 接口', () => {
     const byOid = new Map(classifications.results.map((result: { oid: string; type: string }) => [result.oid, result.type]));
     expect(filtered.every((commit: { oid: string }) => ['merge', 'docs'].includes(byOid.get(commit.oid) as string))).toBe(true);
   }, 15_000);
+
+  it('返回版本化阶段建议并使用仓库外缓存', async () => {
+    const fixture = sharedFixture;
+    const { base, headers } = sharedApp;
+    const index = await fetch(`${base}/api/repositories/fixture`, { headers }).then(response => response.json());
+    const response = await fetch(`${base}/api/repositories/fixture/phases?version=1`, { headers });
+    expect(response.status).toBe(200);
+    const phases = await response.json();
+    expect(phases).toMatchObject({ version: 1, revisionFingerprint: index.revisionFingerprint });
+    expect(phases.boundaries.some((boundary: { reasons: string[] }) => boundary.reasons.some(reason => reason.includes('tag')))).toBe(true);
+    const cacheFile = path.join(fixture.managedRoot, '.ghv-cache', 'fixture', index.revisionFingerprint, 'phases-v1.json');
+    await access(cacheFile);
+    expect(await fetch(`${base}/api/repositories/fixture/phases?version=1`, { headers }).then(result => result.json())).toEqual(phases);
+    expect((await fetch(`${base}/api/repositories/fixture/phases?version=2`, { headers })).status).toBe(400);
+
+    await exec('git', ['update-ref', 'refs/tags/phase-cache-test', fixture.oids.main], { cwd: fixture.repository });
+    const changed = await fetch(`${base}/api/repositories/fixture/phases?version=1`, { headers }).then(result => result.json());
+    expect(changed.revisionFingerprint).not.toBe(phases.revisionFingerprint);
+    await access(path.join(fixture.managedRoot, '.ghv-cache', 'fixture', changed.revisionFingerprint, 'phases-v1.json'));
+    await exec('git', ['update-ref', '-d', 'refs/tags/phase-cache-test'], { cwd: fixture.repository });
+    expect((await fetch(`${base}/api/repositories/fixture/phases?version=1`, { headers }).then(result => result.json())).revisionFingerprint).toBe(phases.revisionFingerprint);
+  }, 15_000);
 });

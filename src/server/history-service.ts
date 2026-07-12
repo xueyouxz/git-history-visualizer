@@ -5,6 +5,7 @@ import path from 'node:path';
 import {
   REPOSITORY_INDEX_VERSION,
   COMMIT_CLASSIFICATION_VERSION,
+  PHASE_ANALYSIS_VERSION,
   COMMIT_TYPES,
   CHANGE_SIZE_LIMITS,
   DIFF_LIMITS,
@@ -17,9 +18,11 @@ import {
   type RepositoryComparison,
   type RepositoryTree,
   type RepositoryClassifications,
+  type RepositoryPhases,
 } from '../shared/history.js';
 import { analyzeContributors } from './contributor-analysis.js';
 import { classifyCommit } from './commit-classification.js';
+import { analyzePhases } from './phase-analysis.js';
 
 const gitEnvironment = {
   GIT_OPTIONAL_LOCKS: '0',
@@ -61,6 +64,15 @@ function runGitBuffer(repository: string, args: string[], signal?: AbortSignal, 
 
 async function runGit(repository: string, args: string[], signal?: AbortSignal, maxBytes?: number) {
   return (await runGitBuffer(repository, args, signal, maxBytes)).toString('utf8');
+}
+
+async function readJson<T>(file: string) {
+  return fs.readFile(file, 'utf8').then(value => JSON.parse(value) as T).catch(() => undefined);
+}
+
+async function writeJsonAtomically(file: string, value: unknown) {
+  await fs.mkdir(path.dirname(file), { recursive: true });
+  const temporary = `${file}.${randomUUID()}.tmp`; await fs.writeFile(temporary, JSON.stringify(value)); await fs.rename(temporary, file);
 }
 
 type RawDiff = Pick<DiffFile, 'path' | 'oldPath' | 'status' | 'similarity' | 'inferred'>;
@@ -189,16 +201,13 @@ export class HistoryService {
     if (cached) return cached;
     const cacheDirectory = path.join(path.resolve(this.managedRoot()), '.ghv-cache', id, revisionFingerprint);
     const cacheFile = path.join(cacheDirectory, `index-v${REPOSITORY_INDEX_VERSION}.json`);
-    const stored = await fs.readFile(cacheFile, 'utf8').then(value => JSON.parse(value) as RepositoryIndex).catch(() => undefined);
+    const stored = await readJson<RepositoryIndex>(cacheFile);
     if (stored?.version === REPOSITORY_INDEX_VERSION && stored.id === id && stored.revisionFingerprint === revisionFingerprint) {
       this.indexes.set(cacheKey, stored);
       return stored;
     }
     const index = await this.buildIndex(id, repository, refs, revisionFingerprint, signal);
-    await fs.mkdir(cacheDirectory, { recursive: true });
-    const temporary = `${cacheFile}.${randomUUID()}.tmp`;
-    await fs.writeFile(temporary, JSON.stringify(index));
-    await fs.rename(temporary, cacheFile);
+    await writeJsonAtomically(cacheFile, index);
     this.indexes.set(cacheKey, index);
     return index;
   }
@@ -327,12 +336,21 @@ export class HistoryService {
     const index = await this.index(id, signal);
     const cacheDirectory = path.join(path.resolve(this.managedRoot()), '.ghv-cache', id, index.revisionFingerprint);
     const cacheFile = path.join(cacheDirectory, `classifications-v${COMMIT_CLASSIFICATION_VERSION}.json`);
-    const cached = await fs.readFile(cacheFile, 'utf8').then(value => JSON.parse(value) as RepositoryClassifications).catch(() => undefined);
+    const cached = await readJson<RepositoryClassifications>(cacheFile);
     if (cached?.version === COMMIT_CLASSIFICATION_VERSION && cached.revisionFingerprint === index.revisionFingerprint && cached.results.length === index.commits.length) return cached;
     const classifications: RepositoryClassifications = { version: COMMIT_CLASSIFICATION_VERSION, revisionFingerprint: index.revisionFingerprint, results: index.commits.map(classifyCommit) };
-    await fs.mkdir(cacheDirectory, { recursive: true });
-    const temporary = `${cacheFile}.${randomUUID()}.tmp`; await fs.writeFile(temporary, JSON.stringify(classifications)); await fs.rename(temporary, cacheFile);
+    await writeJsonAtomically(cacheFile, classifications);
     return classifications;
+  }
+
+  async phases(id: string, signal?: AbortSignal): Promise<RepositoryPhases> {
+    const index = await this.index(id, signal);
+    const cacheDirectory = path.join(path.resolve(this.managedRoot()), '.ghv-cache', id, index.revisionFingerprint);
+    const cacheFile = path.join(cacheDirectory, `phases-v${PHASE_ANALYSIS_VERSION}.json`);
+    const cached = await readJson<RepositoryPhases>(cacheFile);
+    if (cached?.version === PHASE_ANALYSIS_VERSION && cached.revisionFingerprint === index.revisionFingerprint) return cached;
+    const phases = analyzePhases(index); await writeJsonAtomically(cacheFile, phases);
+    return phases;
   }
 
   async compare(id: string, options: { a: string; b: string; parentIndex?: number; ignoreWhitespace?: boolean; contextLines?: number; requestedPath?: string; allowReplacement?: boolean }, signal?: AbortSignal): Promise<RepositoryComparison> {

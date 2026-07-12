@@ -1,11 +1,12 @@
 import { create } from 'zustand';
-import { OTHER_CONTRIBUTOR_ID, type ChangeSizeFilter, type CommitClassification, type CommitType, type IndexedCommit, type RepositoryRef, type RepositorySummary, type RepositoryTopology } from '../shared/history';
+import { OTHER_CONTRIBUTOR_ID, type ChangeSizeFilter, type CommitClassification, type CommitType, type IndexedCommit, type RepositoryPhases, type RepositoryRef, type RepositorySummary, type RepositoryTopology } from '../shared/history';
 export type SemanticZoom = 'global' | 'intermediate' | 'detail';
 export type HistoryUrlState = { repositoryId: string; aOid: string; bOid: string; selectedOid: string };
 
 type HistoryState = {
   repositories: RepositorySummary[];
   repositoryId: string;
+  revisionFingerprint: string;
   range: 'all';
   allCommits: IndexedCommit[];
   commits: IndexedCommit[];
@@ -23,6 +24,8 @@ type HistoryState = {
   contributorPaths: string[];
   classifications: Record<string, CommitClassification>;
   classificationFilters: CommitType[];
+  phaseAnalysis?: RepositoryPhases;
+  phaseOverrides: Record<string, number>;
   mainlineRef: string;
   query: string;
   author: string;
@@ -32,7 +35,7 @@ type HistoryState = {
   boxedOids: string[];
   setRepositories: (repositories: RepositorySummary[]) => void;
   openRepository: (repositoryId: string) => void;
-  setHistory: (commits: IndexedCommit[], refs: RepositoryRef[], topology: RepositoryTopology) => void;
+  setHistory: (commits: IndexedCommit[], refs: RepositoryRef[], topology: RepositoryTopology, revisionFingerprint: string) => void;
   setCommits: (commits: IndexedCommit[]) => void;
   setTopology: (topology: RepositoryTopology) => void;
   select: (oid: string) => void;
@@ -46,6 +49,9 @@ type HistoryState = {
   selectContributor: (authorId: string, majorIds: string[]) => void;
   setClassifications: (classifications: CommitClassification[]) => void;
   toggleClassification: (type: CommitType) => void;
+  setPhaseAnalysis: (analysis: RepositoryPhases, overrides: Record<string, number>) => void;
+  setPhaseBoundary: (oid: string, order: number) => void;
+  clearPhaseAnalysis: () => void;
   setMainlineRef: (mainlineRef: string) => void;
   setQuery: (query: string) => void;
   setAuthor: (author: string) => void;
@@ -66,6 +72,7 @@ const contributorHighlight = (commits: IndexedCommit[], selectedContributorId: s
 export const useHistoryStore = create<HistoryState>(set => ({
   repositories: [],
   repositoryId: '',
+  revisionFingerprint: '',
   range: 'all',
   allCommits: [],
   commits: [],
@@ -82,6 +89,7 @@ export const useHistoryStore = create<HistoryState>(set => ({
   contributorPaths: [],
   classifications: {},
   classificationFilters: [],
+  phaseOverrides: {},
   mainlineRef: '',
   query: '',
   author: '',
@@ -90,11 +98,11 @@ export const useHistoryStore = create<HistoryState>(set => ({
   semanticZoom: 'intermediate',
   boxedOids: [],
   setRepositories: repositories => set({ repositories }),
-  openRepository: repositoryId => set({ repositoryId, selectedOid: '', aOid: '', bOid: '', hoveredOid: '', highlightedPath: '', highlightedOids: [], selectedContributorId: '', contributorMajorIds: [], contributorHighlightOids: [], contributorPaths: [], classifications: {}, classificationFilters: [], boxedOids: [], query: '', author: '', refFilter: '', changeSize: '' }),
-  setHistory: (commits, refs, topology) => set(state => {
+  openRepository: repositoryId => set({ repositoryId, revisionFingerprint: '', selectedOid: '', aOid: '', bOid: '', hoveredOid: '', highlightedPath: '', highlightedOids: [], selectedContributorId: '', contributorMajorIds: [], contributorHighlightOids: [], contributorPaths: [], classifications: {}, classificationFilters: [], phaseAnalysis: undefined, phaseOverrides: {}, boxedOids: [], query: '', author: '', refFilter: '', changeSize: '' }),
+  setHistory: (commits, refs, topology, revisionFingerprint) => set(state => {
     const available = new Set(commits.map(commit => commit.oid));
     return {
-      allCommits: commits, commits, refs, topology, mainlineRef: topology.mainlineRef,
+      allCommits: commits, commits, refs, topology, revisionFingerprint, mainlineRef: topology.mainlineRef,
       selectedOid: available.has(state.selectedOid) ? state.selectedOid : commits[0]?.oid ?? '',
       aOid: available.has(state.aOid) ? state.aOid : '',
       bOid: available.has(state.bOid) ? state.bOid : '',
@@ -128,6 +136,9 @@ export const useHistoryStore = create<HistoryState>(set => ({
   }),
   setClassifications: results => set({ classifications: Object.fromEntries(results.map(result => [result.oid, result])) }),
   toggleClassification: type => set(state => ({ classificationFilters: state.classificationFilters.includes(type) ? state.classificationFilters.filter(current => current !== type) : [...state.classificationFilters, type].sort((left, right) => left.localeCompare(right, 'en')) })),
+  setPhaseAnalysis: (phaseAnalysis, phaseOverrides) => set({ phaseAnalysis, phaseOverrides }),
+  setPhaseBoundary: (oid, order) => set(state => ({ phaseOverrides: { ...state.phaseOverrides, [oid]: order } })),
+  clearPhaseAnalysis: () => set({ phaseAnalysis: undefined, phaseOverrides: {} }),
   setMainlineRef: mainlineRef => set({ mainlineRef }),
   setQuery: query => set({ query }),
   setAuthor: author => set({ author }),

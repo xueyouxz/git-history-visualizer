@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { ImportService } from './import-service.js';
 import { HistoryService } from './history-service.js';
 import { isTerminalImportPhase, type ImportPhase } from '../shared/import.js';
-import { COMMIT_CLASSIFICATION_VERSION, CONTRIBUTOR_ANALYSIS_VERSION } from '../shared/history.js';
+import { COMMIT_CLASSIFICATION_VERSION, CONTRIBUTOR_ANALYSIS_VERSION, PHASE_ANALYSIS_VERSION } from '../shared/history.js';
 
 const json = (res: ServerResponse, status: number, body: unknown) => { res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(body)); };
 const contentType = (file: string) => file.endsWith('.html') ? 'text/html; charset=utf-8' : file.endsWith('.js') ? 'text/javascript; charset=utf-8' : file.endsWith('.css') ? 'text/css; charset=utf-8' : 'application/octet-stream';
@@ -59,6 +59,12 @@ export function createApp(options: { managedRoot?: string; browseRoot?: string; 
           const version = Number(url.searchParams.get('version') ?? COMMIT_CLASSIFICATION_VERSION);
           if (version !== COMMIT_CLASSIFICATION_VERSION) return json(res, 400, { error: '提交分类版本不受支持' });
           return json(res, 200, await history.classifications(decodeURIComponent(classificationRoute[1]), requestController.signal));
+        }
+        const phaseRoute = url.pathname.match(/^\/api\/repositories\/([^/]+)\/phases$/);
+        if (phaseRoute && req.method === 'GET') {
+          const version = Number(url.searchParams.get('version') ?? PHASE_ANALYSIS_VERSION);
+          if (version !== PHASE_ANALYSIS_VERSION) return json(res, 400, { error: '阶段分析版本不受支持' });
+          return json(res, 200, await history.phases(decodeURIComponent(phaseRoute[1]), requestController.signal));
         }
         const diffRoute = url.pathname.match(/^\/api\/repositories\/([^/]+)\/diff$/);
         if (diffRoute && req.method === 'GET') {

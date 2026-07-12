@@ -228,3 +228,44 @@ test('分类请求失败不清空原始 DAG', async ({ page }) => {
   await expect(page.locator('svg.dag')).toHaveAccessibleName(/4 个提交/, { timeout: 15_000 });
   await expect(page.getByRole('alert')).toContainText('模拟分类失败');
 });
+
+test('阶段建议显示背景和依据，拖动边界只调整叠加层并可关闭', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('svg.dag')).toHaveAccessibleName(/4 个提交/, { timeout: 15_000 });
+  await expect(page.locator('.phase-region')).toHaveCount(2);
+  await expect(page.locator('.phase-analysis')).toContainText('tag v1-feature');
+  const boundary = page.getByRole('slider', { name: /阶段边界/ }).first();
+  const movedBoundary = await boundary.inputValue() === '1' ? '2' : '1';
+  await boundary.fill(movedBoundary);
+  await expect(boundary).toHaveValue(movedBoundary);
+  await expect.poll(() => page.evaluate(() => Array.from({ length: localStorage.length }, (_, index) => localStorage.key(index)).some(key => key?.startsWith('ghv:phases:v1:')))).toBe(true);
+  await expect(page.locator('svg.dag')).toHaveAccessibleName(/4 个提交/);
+  await page.getByRole('button', { name: '关闭阶段分析' }).click();
+  await expect(page.locator('.phase-region')).toHaveCount(0);
+  await expect(page.locator('svg.dag')).toHaveAccessibleName(/4 个提交/);
+  await page.getByRole('button', { name: '启用阶段分析' }).click();
+  await expect(page.locator('.phase-region')).toHaveCount(2);
+});
+
+test('阶段分析失败和取消不影响核心视图，并支持重试', async ({ page }) => {
+  await page.route('**/phases?*', route => route.fulfill({ status: 400, contentType: 'application/json', body: JSON.stringify({ error: '模拟阶段失败' }) }));
+  await page.goto('/');
+  await expect(page.locator('svg.dag')).toHaveAccessibleName(/4 个提交/, { timeout: 15_000 });
+  await expect(page.locator('.phase-analysis').getByRole('alert')).toContainText('模拟阶段失败');
+  await page.getByRole('button', { name: /initial，Alice/ }).click();
+  await page.getByRole('button', { name: '设当前为 A' }).click();
+  await page.getByRole('button', { name: /add unicode guide，Bob/ }).click();
+  await page.getByRole('button', { name: '设当前为 B' }).click();
+  await expect(page.locator('.comparison-path')).toBeVisible();
+  await page.getByRole('tab', { name: '代码地图' }).click();
+  await expect(page.getByRole('button', { name: /README.md.*字节/ })).toBeVisible();
+  await page.unroute('**/phases?*');
+  await page.getByRole('button', { name: '重试阶段分析' }).click();
+  await expect(page.locator('.phase-region')).toHaveCount(2);
+
+  await page.route('**/phases?*', async route => { await new Promise(resolve => setTimeout(resolve, 2_000)); await route.continue(); });
+  await page.getByRole('button', { name: '重新分析阶段' }).click();
+  await page.getByRole('button', { name: '取消阶段分析' }).click();
+  await expect(page.locator('.phase-analysis')).toContainText('阶段分析已取消');
+  await expect(page.locator('svg.dag')).toHaveAccessibleName(/4 个提交/);
+});
